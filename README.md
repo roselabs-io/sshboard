@@ -2,7 +2,7 @@
 
 Operator console for [sshca](https://github.com/roselabs-io/sshca) and [bastionhub](https://github.com/roselabs-io/bastionhub). HTMX + Go.
 
-**v0.0.1-dev** — scaffold stage. HTTP server + token gate + CLI detection + view skeleton in place. Real data parsing + actions land in v0.1.
+**v0.1.0** — first real release. Both views wire live data; cert revoke + KRL ship via sshca; endpoint SSH commands copy to clipboard.
 
 ## What it is
 
