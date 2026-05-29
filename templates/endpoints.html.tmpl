@@ -1,13 +1,71 @@
 {{define "endpoints-content"}}
 <hgroup>
     <h1>Endpoints</h1>
-    <p>Reading <code>{{.Detected.Bastionhub}}</code>'s endpoints.yaml + live tunnel state.</p>
+    <p>Reading <code>{{.BastionhubConfig}}</code> + live tunnel state via <code>bastionhub status</code>.</p>
 </hgroup>
 
-<article>
-    <header><strong>v0.0.1 scaffold</strong></header>
-    <p>This view will render the configured endpoints + their live tunnel state: NAME, PORT, USER, STATUS (UP/DOWN), UPTIME, description.</p>
-    <p>Actions: click-to-copy <code>bastionhub ssh &lt;name&gt;</code> command to clipboard, click-to-edit (HTMX form to mutate endpoints.yaml), click-to-enroll (multi-step modal for the full enroll flow).</p>
-    <p><em>Coming in the second half of v0.1.</em></p>
+{{if .Error}}
+<article class="error">
+    <strong>Error</strong>
+    <p>{{.Error}}</p>
 </article>
+{{else if not .Endpoints}}
+<article>
+    <strong>(no endpoints configured)</strong>
+    <p>Run <code>bastionhub init</code> + <code>bastionhub endpoint register &lt;name&gt; --port N --user U</code> to populate this table.</p>
+</article>
+{{else}}
+<p><small class="muted">{{len .Endpoints}} endpoint(s). UP first, then DOWN, then UNKNOWN.</small></p>
+<div class="table-scroll">
+    <table>
+        <thead>
+            <tr>
+                <th>STATUS</th>
+                <th>NAME</th>
+                <th>PORT</th>
+                <th>USER</th>
+                <th>UPTIME</th>
+                <th>DESCRIPTION</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {{range .Endpoints}}
+            <tr id="endpoint-row-{{.Name}}">
+                <td><span class="badge {{.StatusClass}}">{{.Status}}</span></td>
+                <td><code>{{.Name}}</code></td>
+                <td><small>{{.Port}}</small></td>
+                <td><small>{{.User}}</small></td>
+                <td><small>{{.Uptime}}</small></td>
+                <td><small>{{.Description}}</small></td>
+                <td>
+                    <button class="secondary outline small"
+                            data-copy="bastionhub ssh {{.Name}}"
+                            onclick="copyAndConfirm(this)">
+                        Copy SSH
+                    </button>
+                </td>
+            </tr>
+            {{end}}
+        </tbody>
+    </table>
+</div>
+{{end}}
+
+<script>
+    function copyAndConfirm(btn) {
+        const text = btn.getAttribute('data-copy');
+        navigator.clipboard.writeText(text).then(() => {
+            const orig = btn.textContent;
+            btn.textContent = '✓ Copied';
+            btn.disabled = true;
+            setTimeout(() => {
+                btn.textContent = orig;
+                btn.disabled = false;
+            }, 1200);
+        }).catch((err) => {
+            alert('Copy failed: ' + err);
+        });
+    }
+</script>
 {{end}}

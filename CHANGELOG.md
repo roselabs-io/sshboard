@@ -4,19 +4,40 @@ All notable changes to `sshboard` will be documented in this file.
 
 Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning is [SemVer](https://semver.org/) once we reach v1.0; until then, breaking changes can land in minor releases — see "Stability promises" in [README.md](README.md).
 
-## [Unreleased]
+## [0.1.0] — 2026-05-29
 
-### Added (toward v0.1)
+First real release. Both views render live data; cert revoke ships via sshca; endpoint SSH commands copy to clipboard.
 
-- **Certs view wires real data.** Parses sshca's JSONL audit log at `$SSHCA_CA_DIR/issuance-log.jsonl` (or `--ca-dir <path>`), computes expiry via the same `+8h`/`+52w`/`from:to` parsing sshca uses internally, classifies each cert as ACTIVE / EXPIRING (within 24h) / EXPIRED / NEVER, sorts by expiry ascending. Renders as a Pico-styled table with status badges.
+### Added — Certs view
+
+- Parses sshca's JSONL audit log at `$SSHCA_CA_DIR/issuance-log.jsonl` (or `--ca-dir <path>`), computes expiry via the same `+8h`/`+52w`/`from:to` parsing sshca uses internally, classifies each cert as ACTIVE / EXPIRING (within 24h) / EXPIRED / NEVER, sorts by expiry ascending. Renders as a Pico-styled table with status badges.
 - **Click-to-revoke via HTMX.** Each non-revoked row carries a Revoke button that POSTs to `/t/<token>/api/cert/revoke`; server shells out to `sshca cert revoke --ca <ca> --key-id <id>`. Browser `hx-confirm` prompts before sending. Server responds with the row's HTML re-rendered with status REVOKED; HTMX swaps it in place. No page reload.
-- **Optional KRL ship.** New `--krl-ship user@host:/etc/ssh/revoked_keys.krl` flag at startup; when set, every revoke also runs `sshca cert revoke --ship <target>` so the bastion's KRL stays in sync. Default (unset) is local-only revoke; UI shows a hint about manual shipping in that mode.
-- `--ca-dir` startup flag (overrides `$SSHCA_CA_DIR`, which overrides default `./ca`).
+- **Optional KRL ship.** `--krl-ship user@host:/etc/ssh/revoked_keys.krl` flag; when set, every revoke also runs `sshca cert revoke --ship <target>` so the bastion's KRL stays in sync. Default is local-only.
 
-### Planned (remaining for v0.1)
+### Added — Endpoints view
 
-- Real endpoint table: parses bastionhub's `endpoints.yaml`, queries live tunnel state via `bastionhub status`, renders rows with UP/DOWN/UPTIME and a click-to-copy SSH command.
-- `--config` flag for endpoints.yaml path.
+- Parses bastionhub's `endpoints.yaml` at `$BASTIONHUB_CONFIG` (or `--config <path>`, defaults to `~/.config/bastionhub/endpoints.yaml`).
+- Shells out to `bastionhub status` for live tunnel state; parses the tabular output per bastionhub's documented contract; merges with the YAML config.
+- Renders as table: STATUS (UP/DOWN/UNKNOWN), NAME, PORT, USER, UPTIME, DESCRIPTION. UP-first sort with name tiebreak.
+- **Click-to-copy SSH command** copies `bastionhub ssh <name>` to clipboard via `navigator.clipboard.writeText`; button text confirms `✓ Copied` for 1.2s then resets.
+
+### Added — Flags
+
+- `--ca-dir` (overrides `$SSHCA_CA_DIR`, defaults to `./ca`)
+- `--config` (overrides `$BASTIONHUB_CONFIG`, defaults to `~/.config/bastionhub/endpoints.yaml`)
+- `--krl-ship <scp-target>` (described above)
+
+### Added — CD release pipeline
+
+- `.github/workflows/release.yml` on `v*` tag push builds the 6-platform matrix with ldflags injection, packages as `.tar.gz` / `.zip`, generates SHA-256 checksums, attaches to a GitHub Release.
+
+### Added — Tests
+
+- 5 tests covering `parseSSHKeygenDuration` (units + edge cases), `parseExpiry` (relative / absolute / `always`), `formatTimeLeft`, `parseBastionhubStatus` (happy path + empty + no-header defensive).
+
+### Dependencies
+
+- New runtime dep: `gopkg.in/yaml.v3` (for endpoints.yaml parsing).
 
 ## [0.0.1-dev] — 2026-05-29
 

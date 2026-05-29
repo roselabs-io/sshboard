@@ -70,15 +70,21 @@ table code {
     text-transform: uppercase;
 }
 
-.status-active   { background: #d4f4dd; color: #1a5d2e; }
-.status-expiring { background: #fff3cd; color: #6e4d00; }
-.status-expired  { background: #f8d7da; color: #842029; }
-.status-revoked  { background: #e2e3e5; color: #41464b; text-decoration: line-through; }
+.status-active,
+.status-up        { background: #d4f4dd; color: #1a5d2e; }
+.status-expiring  { background: #fff3cd; color: #6e4d00; }
+.status-expired,
+.status-down      { background: #f8d7da; color: #842029; }
+.status-revoked   { background: #e2e3e5; color: #41464b; text-decoration: line-through; }
+.status-unknown   { background: #e2e3e5; color: #41464b; }
 
-[data-theme="dark"] .status-active   { background: #0e3d1b; color: #79e394; }
-[data-theme="dark"] .status-expiring { background: #4a3a00; color: #f9d97a; }
-[data-theme="dark"] .status-expired  { background: #4a1d22; color: #f48a91; }
-[data-theme="dark"] .status-revoked  { background: #2a2c2f; color: #9c9ea0; }
+[data-theme="dark"] .status-active,
+[data-theme="dark"] .status-up        { background: #0e3d1b; color: #79e394; }
+[data-theme="dark"] .status-expiring  { background: #4a3a00; color: #f9d97a; }
+[data-theme="dark"] .status-expired,
+[data-theme="dark"] .status-down      { background: #4a1d22; color: #f48a91; }
+[data-theme="dark"] .status-revoked,
+[data-theme="dark"] .status-unknown   { background: #2a2c2f; color: #9c9ea0; }
 
 /* --- Compact buttons inside table rows --- */
 

@@ -26,13 +26,15 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 // version is the sshboard tool version. Defaults to "0.0.1-dev" during local
 // development; release builds override via:
 //
 //	go build -ldflags "-X main.version=<tag>"
-var version = "0.0.1-dev"
+var version = "0.1.0-dev"
 
 //go:embed templates/*.html.tmpl
 var templatesFS embed.FS
@@ -224,26 +226,174 @@ func readCerts(caDir string, expiringWindow time.Duration) ([]CertView, error) {
 }
 
 // -----------------------------------------------------------------------------
+// Endpoints — read bastionhub's endpoints.yaml + merge with live status
+//
+// Schema mirrors bastionhub's documented contract. Reads YAML directly for
+// the static config; shells out to `bastionhub status` for the live tunnel
+// state and parses the documented tabular output.
+// -----------------------------------------------------------------------------
+
+type Endpoint struct {
+	Port        int    `yaml:"port"`
+	User        string `yaml:"user"`
+	Identity    string `yaml:"identity,omitempty"`
+	Description string `yaml:"description,omitempty"`
+}
+
+type endpointsConfig struct {
+	BastionAlias string              `yaml:"bastion_alias"`
+	AdminAlias   string              `yaml:"admin_alias"`
+	Endpoints    map[string]Endpoint `yaml:"endpoints"`
+}
+
+// EndpointView is an Endpoint enriched with live status + Token (for the
+// per-row template's hx-on/copy actions).
+type EndpointView struct {
+	Name        string
+	Port        int
+	User        string
+	Identity    string
+	Description string
+	Status      string // UP | DOWN | UNKNOWN
+	StatusClass string
+	Uptime      string
+	Token       string
+}
+
+func resolveBastionhubConfig(flagVal string) string {
+	if flagVal != "" {
+		return flagVal
+	}
+	if env := os.Getenv("BASTIONHUB_CONFIG"); env != "" {
+		return env
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".config", "bastionhub", "endpoints.yaml")
+}
+
+// parseBastionhubStatus parses the tabular output of `bastionhub status`.
+// Returns a map of endpoint name → (status, uptime). Skips header lines.
+// Tabular format per bastionhub's documented contract:
+//
+//	NAME                 PORT    STATUS UPTIME       DESCRIPTION
+//	customer-002         12002   DOWN   —            ...
+func parseBastionhubStatus(out string) map[string][2]string {
+	result := map[string][2]string{}
+	seenHeader := false
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimRight(line, "\r")
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if !seenHeader {
+			if strings.HasPrefix(trimmed, "NAME") {
+				seenHeader = true
+			}
+			continue
+		}
+		// Data row. First 4 tokens are NAME PORT STATUS UPTIME; rest is DESCRIPTION.
+		parts := strings.Fields(line)
+		if len(parts) < 4 {
+			continue
+		}
+		name := parts[0]
+		status := parts[2]
+		uptime := parts[3]
+		result[name] = [2]string{status, uptime}
+	}
+	return result
+}
+
+func readEndpoints(configPath, bastionhubPath string) ([]EndpointView, error) {
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return nil, err
+	}
+	cfg := &endpointsConfig{Endpoints: map[string]Endpoint{}}
+	if err := yaml.Unmarshal(data, cfg); err != nil {
+		return nil, fmt.Errorf("parsing %s: %w", configPath, err)
+	}
+	if cfg.Endpoints == nil {
+		cfg.Endpoints = map[string]Endpoint{}
+	}
+
+	// Try to fetch live status — failure is non-fatal; views fall back to "?"
+	liveStatus := map[string][2]string{}
+	if bastionhubPath != "" {
+		out, err := exec.Command(bastionhubPath, "status").CombinedOutput()
+		if err == nil {
+			liveStatus = parseBastionhubStatus(string(out))
+		}
+	}
+
+	var views []EndpointView
+	for name, ep := range cfg.Endpoints {
+		v := EndpointView{
+			Name:        name,
+			Port:        ep.Port,
+			User:        ep.User,
+			Identity:    ep.Identity,
+			Description: ep.Description,
+			Status:      "UNKNOWN",
+			StatusClass: "status-unknown",
+			Uptime:      "—",
+		}
+		if s, ok := liveStatus[name]; ok {
+			v.Status = s[0]
+			v.Uptime = s[1]
+			switch s[0] {
+			case "UP":
+				v.StatusClass = "status-up"
+			case "DOWN":
+				v.StatusClass = "status-down"
+			}
+		}
+		views = append(views, v)
+	}
+	// Sort: UP first, then DOWN, then UNKNOWN; tie-break by name.
+	sort.Slice(views, func(i, j int) bool {
+		ord := func(s string) int {
+			switch s {
+			case "UP":
+				return 0
+			case "DOWN":
+				return 1
+			default:
+				return 2
+			}
+		}
+		if a, b := ord(views[i].Status), ord(views[j].Status); a != b {
+			return a < b
+		}
+		return views[i].Name < views[j].Name
+	})
+	return views, nil
+}
+
+// -----------------------------------------------------------------------------
 // App
 // -----------------------------------------------------------------------------
 
 type app struct {
-	detected   detected
-	tmpl       *template.Template
-	token      string
-	caDir      string
-	shipTarget string // optional --krl-ship target; empty = local-only revoke
+	detected         detected
+	tmpl             *template.Template
+	token            string
+	caDir            string
+	bastionhubConfig string
+	shipTarget       string // optional --krl-ship target; empty = local-only revoke
 }
 
 func (a *app) viewData(view string, extra map[string]any) map[string]any {
 	data := map[string]any{
-		"Title":    "sshboard",
-		"Version":  version,
-		"Detected": a.detected,
-		"Token":    a.token,
-		"View":     view,
-		"CADir":    a.caDir,
-		"ShipTarget": a.shipTarget,
+		"Title":            "sshboard",
+		"Version":          version,
+		"Detected":         a.detected,
+		"Token":            a.token,
+		"View":             view,
+		"CADir":            a.caDir,
+		"BastionhubConfig": a.bastionhubConfig,
+		"ShipTarget":       a.shipTarget,
 	}
 	for k, v := range extra {
 		data[k] = v
@@ -282,7 +432,23 @@ func (a *app) certs(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (a *app) endpoints(w http.ResponseWriter, _ *http.Request) {
-	a.render(w, "endpoints", nil)
+	extra := map[string]any{}
+	if a.detected.Bastionhub == "" {
+		extra["Error"] = "bastionhub not detected on PATH."
+		a.render(w, "endpoints", extra)
+		return
+	}
+	views, err := readEndpoints(a.bastionhubConfig, a.detected.Bastionhub)
+	if err != nil {
+		extra["Error"] = fmt.Sprintf("Reading %s: %v", a.bastionhubConfig, err)
+		a.render(w, "endpoints", extra)
+		return
+	}
+	for i := range views {
+		views[i].Token = a.token
+	}
+	extra["Endpoints"] = views
+	a.render(w, "endpoints", extra)
 }
 
 // revokeCert handles POST /t/<token>/api/cert/revoke
@@ -365,6 +531,7 @@ func generateToken() string {
 func main() {
 	bind := flag.String("bind", "127.0.0.1:7890", "address to bind (default: 127.0.0.1:7890 — localhost only)")
 	caDirFlag := flag.String("ca-dir", "", "sshca CA directory (default: $SSHCA_CA_DIR, then ./ca)")
+	configFlag := flag.String("config", "", "bastionhub endpoints.yaml path (default: $BASTIONHUB_CONFIG, then ~/.config/bastionhub/endpoints.yaml)")
 	shipTarget := flag.String("krl-ship", "", "optional scp target for cert revoke (e.g. root@bastion:/etc/ssh/revoked_keys.krl). If unset, revoke updates local KRL only.")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
@@ -382,11 +549,12 @@ func main() {
 	tmpl := template.Must(template.ParseFS(templatesFS, "templates/*.html.tmpl"))
 
 	a := &app{
-		detected:   detectCLIs(),
-		tmpl:       tmpl,
-		token:      generateToken(),
-		caDir:      resolveCaDir(*caDirFlag),
-		shipTarget: *shipTarget,
+		detected:         detectCLIs(),
+		tmpl:             tmpl,
+		token:            generateToken(),
+		caDir:            resolveCaDir(*caDirFlag),
+		bastionhubConfig: resolveBastionhubConfig(*configFlag),
+		shipTarget:       *shipTarget,
 	}
 
 	// Startup banner
@@ -407,6 +575,7 @@ func main() {
 		log.Fatal("Neither sshca nor bastionhub found on PATH — sshboard has nothing to show.")
 	}
 	fmt.Println("CA dir:", a.caDir)
+	fmt.Println("Bastionhub config:", a.bastionhubConfig)
 	if a.shipTarget != "" {
 		fmt.Println("KRL ship target:", a.shipTarget)
 	}
