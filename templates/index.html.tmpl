@@ -1,0 +1,51 @@
+{{define "content"}}
+<hgroup>
+    <h1>sshboard</h1>
+    <p>Operator console for <a href="https://github.com/roselabs-io/sshca">sshca</a> and <a href="https://github.com/roselabs-io/bastionhub">bastionhub</a>.</p>
+</hgroup>
+
+<article>
+    <header><strong>Detected CLIs</strong></header>
+    <ul>
+        <li>
+            sshca:
+            {{if .Detected.Sshca}}
+                <code>{{.Detected.Sshca}}</code>
+            {{else}}
+                <em>not on PATH</em> &mdash; <code>brew install roselabs-io/tools/sshca</code>
+            {{end}}
+        </li>
+        <li>
+            bastionhub:
+            {{if .Detected.Bastionhub}}
+                <code>{{.Detected.Bastionhub}}</code>
+            {{else}}
+                <em>not on PATH</em> &mdash; <code>brew install roselabs-io/tools/bastionhub</code>
+            {{end}}
+        </li>
+    </ul>
+</article>
+
+<h2>Views</h2>
+
+<div class="grid">
+    <article>
+        <header><strong>Certs</strong></header>
+        <p>Every issued cert in the audit log, with principals, expiry, and status. Click to revoke or renew.</p>
+        {{if .Detected.Sshca}}
+            <a href="/t/{{.Token}}/certs" role="button">Open Certs &rarr;</a>
+        {{else}}
+            <small><em>Requires sshca on PATH.</em></small>
+        {{end}}
+    </article>
+    <article>
+        <header><strong>Endpoints</strong></header>
+        <p>Configured endpoints, live tunnel status, click-to-SSH.</p>
+        {{if .Detected.Bastionhub}}
+            <a href="/t/{{.Token}}/endpoints" role="button">Open Endpoints &rarr;</a>
+        {{else}}
+            <small><em>Requires bastionhub on PATH.</em></small>
+        {{end}}
+    </article>
+</div>
+{{end}}

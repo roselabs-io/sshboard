@@ -1,0 +1,50 @@
+{{define "layout"}}<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Title}}{{if ne .View "index"}} — {{.View}}{{end}}</title>
+    <link rel="stylesheet" href="/static/pico.min.css">
+    <link rel="stylesheet" href="/static/app.css">
+    <script src="/static/htmx.min.js"></script>
+</head>
+<body>
+    <main class="container">
+        <header>
+            <nav>
+                <ul>
+                    <li><strong>sshboard</strong> <small class="muted">v{{.Version}}</small></li>
+                </ul>
+                <ul>
+                    <li><a href="/t/{{.Token}}/" {{if eq .View "index"}}aria-current="page"{{end}}>Home</a></li>
+                    <li>
+                        {{if .Detected.Sshca}}
+                            <a href="/t/{{.Token}}/certs" {{if eq .View "certs"}}aria-current="page"{{end}}>Certs</a>
+                        {{else}}
+                            <span class="muted" title="sshca not detected">Certs</span>
+                        {{end}}
+                    </li>
+                    <li>
+                        {{if .Detected.Bastionhub}}
+                            <a href="/t/{{.Token}}/endpoints" {{if eq .View "endpoints"}}aria-current="page"{{end}}>Endpoints</a>
+                        {{else}}
+                            <span class="muted" title="bastionhub not detected">Endpoints</span>
+                        {{end}}
+                    </li>
+                </ul>
+            </nav>
+        </header>
+
+        {{block "content" .}}{{end}}
+
+        <footer>
+            <hr>
+            <small class="muted">
+                sshboard v{{.Version}} &middot;
+                <a href="https://github.com/roselabs-io/sshboard">source</a>
+            </small>
+        </footer>
+    </main>
+</body>
+</html>
+{{end}}

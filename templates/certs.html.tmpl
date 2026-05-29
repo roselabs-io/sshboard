@@ -1,0 +1,13 @@
+{{define "content"}}
+<hgroup>
+    <h1>Certs</h1>
+    <p>Reading <code>{{.Detected.Sshca}}</code>'s issuance log + KRL.</p>
+</hgroup>
+
+<article>
+    <header><strong>v0.0.1 scaffold</strong></header>
+    <p>This view will render the JSONL audit log as a sortable table: KEY_ID, principals, valid-from, valid-until, status (active / expiring / expired / revoked), issuer.</p>
+    <p>Actions: click-to-revoke (shells out to <code>sshca cert revoke</code>), click-to-renew (shells out to <code>sshca cert renew --ship ...</code>), click-to-inspect (modal with <code>ssh-keygen -L</code> output).</p>
+    <p><em>Coming in v0.1.</em></p>
+</article>
+{{end}}

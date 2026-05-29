@@ -1,0 +1,63 @@
+# CI — build + vet on every push to main and every PR.
+#
+# Matrix covers the 6 release targets (linux/darwin/windows × amd64/arm64).
+# Each cell vets + builds for that specific GOOS/GOARCH combo so
+# platform-specific build failures get caught at PR time rather than
+# at release time.
+#
+# Tagged release pipeline (release.yml on `v*` tag push) lands when we
+# tag v0.0.1 or later.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    name: build & vet (${{ matrix.goos }}/${{ matrix.goarch }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+            ext: .exe
+          - goos: windows
+            goarch: arm64
+            ext: .exe
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: go vet
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: go vet ./...
+
+      - name: go build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: '0'
+        run: go build -o /tmp/sshboard${{ matrix.ext }} .
+
+      - name: go test
+        if: matrix.goos == 'linux' && matrix.goarch == 'amd64'
+        run: go test ./...
