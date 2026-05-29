@@ -1,0 +1,26 @@
+{{define "cert-row"}}<tr id="cert-row-{{.KeyID}}">
+    <td><span class="badge {{.StatusClass}}">{{.Status}}</span></td>
+    <td><code>{{.KeyID}}</code></td>
+    <td>
+        {{range $i, $p := .PrincipalsList}}{{if $i}}, {{end}}<code>{{$p}}</code>{{end}}
+    </td>
+    <td>{{.CA}}</td>
+    <td>
+        {{if .HasExpiry}}<small>{{.ExpiresAt.Format "2006-01-02 15:04 UTC"}}</small>{{else}}—{{end}}
+    </td>
+    <td><small>{{.TimeLeft}}</small></td>
+    <td>
+        {{if and (ne .Status "REVOKED") (ne .Status "NEVER")}}
+        <form hx-post="/t/{{.Token}}/api/cert/revoke"
+              hx-target="#cert-row-{{.KeyID}}"
+              hx-swap="outerHTML"
+              hx-confirm="Revoke cert {{.KeyID}} ({{.Principals}})? This cannot be undone.">
+            <input type="hidden" name="key_id" value="{{.KeyID}}">
+            <input type="hidden" name="ca" value="{{.CA}}">
+            <input type="hidden" name="principals" value="{{.Principals}}">
+            <button type="submit" class="secondary outline small">Revoke</button>
+        </form>
+        {{end}}
+    </td>
+</tr>
+{{end}}

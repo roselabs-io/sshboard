@@ -23,8 +23,71 @@ article header strong {
     font-size: 1.1em;
 }
 
+article.error {
+    border-color: var(--pico-color-red-500, #c62828);
+    background-color: var(--pico-color-red-50, #fff1f1);
+}
+
 .grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
     gap: 1rem;
+}
+
+/* --- Cert / Endpoint table styling --- */
+
+.table-scroll {
+    overflow-x: auto;
+}
+
+table {
+    font-size: 0.92em;
+}
+
+table th {
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 0.75em;
+    letter-spacing: 0.05em;
+    color: var(--pico-muted-color);
+}
+
+table code {
+    font-size: 0.9em;
+    padding: 0.1em 0.3em;
+    background: var(--pico-code-background-color);
+}
+
+/* --- Status badges --- */
+
+.badge {
+    display: inline-block;
+    padding: 0.15em 0.6em;
+    border-radius: 0.5em;
+    font-size: 0.75em;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.status-active   { background: #d4f4dd; color: #1a5d2e; }
+.status-expiring { background: #fff3cd; color: #6e4d00; }
+.status-expired  { background: #f8d7da; color: #842029; }
+.status-revoked  { background: #e2e3e5; color: #41464b; text-decoration: line-through; }
+
+[data-theme="dark"] .status-active   { background: #0e3d1b; color: #79e394; }
+[data-theme="dark"] .status-expiring { background: #4a3a00; color: #f9d97a; }
+[data-theme="dark"] .status-expired  { background: #4a1d22; color: #f48a91; }
+[data-theme="dark"] .status-revoked  { background: #2a2c2f; color: #9c9ea0; }
+
+/* --- Compact buttons inside table rows --- */
+
+button.small {
+    padding: 0.25em 0.7em;
+    font-size: 0.85em;
+    margin: 0;
+}
+
+form {
+    margin: 0;
 }

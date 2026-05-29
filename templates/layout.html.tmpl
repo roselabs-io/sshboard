@@ -35,7 +35,10 @@
             </nav>
         </header>
 
-        {{block "content" .}}{{end}}
+        {{if eq .View "index"}}{{template "index-content" .}}
+        {{else if eq .View "certs"}}{{template "certs-content" .}}
+        {{else if eq .View "endpoints"}}{{template "endpoints-content" .}}
+        {{end}}
 
         <footer>
             <hr>

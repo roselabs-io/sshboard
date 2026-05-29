@@ -1,4 +1,4 @@
-{{define "content"}}
+{{define "index-content"}}
 <hgroup>
     <h1>sshboard</h1>
     <p>Operator console for <a href="https://github.com/roselabs-io/sshca">sshca</a> and <a href="https://github.com/roselabs-io/bastionhub">bastionhub</a>.</p>
@@ -24,6 +24,7 @@
             {{end}}
         </li>
     </ul>
+    <p><small class="muted">CA dir: <code>{{.CADir}}</code>{{if .ShipTarget}} &middot; KRL ship target: <code>{{.ShipTarget}}</code>{{end}}</small></p>
 </article>
 
 <h2>Views</h2>

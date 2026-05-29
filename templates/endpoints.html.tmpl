@@ -1,4 +1,4 @@
-{{define "content"}}
+{{define "endpoints-content"}}
 <hgroup>
     <h1>Endpoints</h1>
     <p>Reading <code>{{.Detected.Bastionhub}}</code>'s endpoints.yaml + live tunnel state.</p>
@@ -7,7 +7,7 @@
 <article>
     <header><strong>v0.0.1 scaffold</strong></header>
     <p>This view will render the configured endpoints + their live tunnel state: NAME, PORT, USER, STATUS (UP/DOWN), UPTIME, description.</p>
-    <p>Actions: click-to-SSH (opens a browser-side terminal? or copies <code>bastionhub ssh &lt;name&gt;</code> to clipboard?), click-to-edit (HTMX form to mutate endpoints.yaml), click-to-enroll (multi-step modal for the full enroll flow).</p>
-    <p><em>Coming in v0.1.</em></p>
+    <p>Actions: click-to-copy <code>bastionhub ssh &lt;name&gt;</code> command to clipboard, click-to-edit (HTMX form to mutate endpoints.yaml), click-to-enroll (multi-step modal for the full enroll flow).</p>
+    <p><em>Coming in the second half of v0.1.</em></p>
 </article>
 {{end}}

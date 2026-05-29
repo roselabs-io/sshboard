@@ -6,11 +6,17 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-### Planned for v0.1
+### Added (toward v0.1)
 
-- Real cert table: parses sshca's JSONL audit log, renders sortable rows (KEY_ID, principals, valid-from, valid-until, status), click-to-revoke action shelling out to `sshca cert revoke`.
-- Real endpoint table: parses bastionhub's `endpoints.yaml`, queries live tunnel state via `bastionhub status`, renders rows with UP/DOWN/UPTIME.
-- Configurable paths via `--ca-dir` and `--config` flags (in addition to `$SSHCA_CA_DIR` / `$BASTIONHUB_CONFIG`).
+- **Certs view wires real data.** Parses sshca's JSONL audit log at `$SSHCA_CA_DIR/issuance-log.jsonl` (or `--ca-dir <path>`), computes expiry via the same `+8h`/`+52w`/`from:to` parsing sshca uses internally, classifies each cert as ACTIVE / EXPIRING (within 24h) / EXPIRED / NEVER, sorts by expiry ascending. Renders as a Pico-styled table with status badges.
+- **Click-to-revoke via HTMX.** Each non-revoked row carries a Revoke button that POSTs to `/t/<token>/api/cert/revoke`; server shells out to `sshca cert revoke --ca <ca> --key-id <id>`. Browser `hx-confirm` prompts before sending. Server responds with the row's HTML re-rendered with status REVOKED; HTMX swaps it in place. No page reload.
+- **Optional KRL ship.** New `--krl-ship user@host:/etc/ssh/revoked_keys.krl` flag at startup; when set, every revoke also runs `sshca cert revoke --ship <target>` so the bastion's KRL stays in sync. Default (unset) is local-only revoke; UI shows a hint about manual shipping in that mode.
+- `--ca-dir` startup flag (overrides `$SSHCA_CA_DIR`, which overrides default `./ca`).
+
+### Planned (remaining for v0.1)
+
+- Real endpoint table: parses bastionhub's `endpoints.yaml`, queries live tunnel state via `bastionhub status`, renders rows with UP/DOWN/UPTIME and a click-to-copy SSH command.
+- `--config` flag for endpoints.yaml path.
 
 ## [0.0.1-dev] — 2026-05-29
 

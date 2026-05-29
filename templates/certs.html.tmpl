@@ -1,13 +1,43 @@
-{{define "content"}}
+{{define "certs-content"}}
 <hgroup>
     <h1>Certs</h1>
-    <p>Reading <code>{{.Detected.Sshca}}</code>'s issuance log + KRL.</p>
+    <p>Reading <code>{{.CADir}}/issuance-log.jsonl</code>{{if .ShipTarget}} &middot; revoke also ships KRL to <code>{{.ShipTarget}}</code>{{else}} &middot; <small class="muted">no KRL ship target set; revoke updates local KRL only (start sshboard with <code>--krl-ship user@host:/etc/ssh/revoked_keys.krl</code> to push)</small>{{end}}.</p>
 </hgroup>
 
-<article>
-    <header><strong>v0.0.1 scaffold</strong></header>
-    <p>This view will render the JSONL audit log as a sortable table: KEY_ID, principals, valid-from, valid-until, status (active / expiring / expired / revoked), issuer.</p>
-    <p>Actions: click-to-revoke (shells out to <code>sshca cert revoke</code>), click-to-renew (shells out to <code>sshca cert renew --ship ...</code>), click-to-inspect (modal with <code>ssh-keygen -L</code> output).</p>
-    <p><em>Coming in v0.1.</em></p>
+{{if .Error}}
+<article class="error">
+    <strong>Error</strong>
+    <p>{{.Error}}</p>
 </article>
+{{else if not .Certs}}
+<article>
+    <strong>(no certs in issuance log yet)</strong>
+    <p>Sign your first cert via <code>sshca cert sign --ca user --principal X --valid +8h --key-id ID --dir {{.CADir}} &lt;pubkey&gt;</code> to populate this table.</p>
+</article>
+{{else}}
+<p><small class="muted">{{len .Certs}} cert(s). Sorted by expiry (most-urgent first).</small></p>
+<div class="table-scroll">
+    <table>
+        <thead>
+            <tr>
+                <th>STATUS</th>
+                <th>KEY_ID</th>
+                <th>PRINCIPALS</th>
+                <th>CA</th>
+                <th>EXPIRES_AT</th>
+                <th>TIME_LEFT</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {{range .Certs}}{{template "cert-row" .}}{{end}}
+        </tbody>
+    </table>
+</div>
+{{end}}
+
+<script>
+    // HTMX confirms for destructive actions; this is a marker that we're using
+    // hx-confirm on the row template's revoke button.
+</script>
 {{end}}
