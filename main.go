@@ -4,7 +4,7 @@
 // log and bastionhub's endpoints.yaml; shells out to both for actions.
 //
 // Defaults to localhost:7890 + a random startup token in the URL path
-// (Jupyter-style) to defend against drive-by from other localhost services.
+// so that other processes on the same host cannot reach the port by guessing it.
 // No bundled auth. For network exposure, see README "Deployment patterns".
 package main
 
@@ -614,8 +614,8 @@ func main() {
 	fmt.Println()
 	fmt.Printf("Listening on: http://%s%s/\n", *bind, prefix)
 	fmt.Println()
-	fmt.Println("Open this URL in your browser. The token defends against drive-by access")
-	fmt.Println("from other localhost services. Don't share it.")
+	fmt.Println("The token in the path prevents other processes on this host from")
+	fmt.Println("reaching the port. It is not authentication; do not share the URL.")
 	fmt.Println()
 
 	if err := http.ListenAndServe(*bind, mux); err != nil {

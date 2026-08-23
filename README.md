@@ -1,19 +1,22 @@
 # sshboard
 
-Operator console for [sshca](https://github.com/roselabs-io/sshca) and [bastionhub](https://github.com/roselabs-io/bastionhub). HTMX + Go.
+A web interface over [sshca](https://github.com/roselabs-io/sshca) and
+[bastionhub](https://github.com/roselabs-io/bastionhub). Go and HTMX, single
+binary.
 
-**v0.1.0** — first real release. Both views wire live data; cert revoke + KRL ship via sshca; endpoint SSH commands copy to clipboard.
+## Overview
 
-## What it is
+`sshboard` renders two views and proxies actions to the two CLIs:
 
-A small web UI that sits above the two SSH-substrate CLIs and answers the relational questions that don't fit in `--principal X` filters:
+- **Certificates** — sshca's issuance log as a table, with expiry state, filtered
+  by principal or by certificates expiring within a given window.
+- **Endpoints** — bastionhub's registry with live tunnel state and uptime.
 
-- *Who has what active cert right now?* (sshca's audit log, rendered as a sortable table)
-- *Which endpoints are UP, which are DOWN, what's the uptime?* (bastionhub's status, refreshed)
-- *What's expiring in the next 24h?* (cross-cut view)
-- One-click revoke / renew / SSH actions, shelling out to the CLIs.
+Actions run the CLIs: `sshca cert revoke`, `sshca cert renew`, `sshca cert
+inspect`, `bastionhub status`, `bastionhub ssh`.
 
-Substrate-narrow scope: sshboard never holds CA keys, never opens its own SSH connections, never bundles its own auth. It's a render layer + action proxy over the CLIs.
+It holds no CA keys, opens no SSH connections of its own, and ships no
+authentication. It reads two files and executes two binaries.
 
 ## Install
 
@@ -53,27 +56,29 @@ Detected: bastionhub at /opt/homebrew/bin/bastionhub
 
 Listening on: http://127.0.0.1:7890/t/a1b2c3d4e5f6.../
 
-Open this URL in your browser. The token defends against drive-by access
-from other localhost services. Don't share it.
+The token in the path prevents other processes on this host from
+reaching the port. It is not authentication; do not share the URL.
 ```
 
-Open the URL → operator console.
-
-If only one of sshca / bastionhub is on PATH, the relevant tab is grayed out with an install hint; the other tab works as expected.
+If only one of `sshca` or `bastionhub` is on `PATH`, the corresponding view is
+disabled and the other remains available.
 
 ## Deployment patterns
 
-### 1. Solo operator on a laptop (default)
+### 1. Local (default)
 
-`sshboard` binds `127.0.0.1:7890`. No auth needed — you're already on the box, the OS is the trust boundary.
+`sshboard` binds `127.0.0.1:7890`. The operating system's user boundary is the
+access control.
 
-The random startup token in the URL path defends against drive-by access from other localhost services (a malicious dev tool on your laptop hitting the unprotected port). Same pattern Jupyter uses.
+The random token in the URL path prevents other processes on the same host from
+reaching the port. It is not a substitute for authentication.
 
-### 2. Dogfood — run on your bastion, access via SSH LocalForward
+### 2. On the bastion, reached over an SSH local forward
 
-This is the recommended pattern for team use. sshboard runs on the bastion VPS; engineers SSH to the bastion (cert-auth via bastionhub) with `LocalForward` set; they open `http://localhost:7890` locally.
-
-The substrate IS the auth layer. SSH + cert is the security boundary. sshboard never listens on the network.
+`sshboard` runs on the bastion and stays bound to loopback. Operators connect
+with `LocalForward` configured and open the port locally. Access is therefore
+governed by the same certificate that grants SSH access; revoking it removes
+access, since sshd re-reads the KRL on every connection.
 
 ```
 ~/.ssh/config (on each engineer's laptop):
@@ -84,19 +89,19 @@ Host bastion
     LocalForward 7890 127.0.0.1:7890
 ```
 
-Then `ssh bastion` opens the forward + the session. Open browser → `http://localhost:7890`.
+`ssh bastion` opens the forward; the interface is then at
+`http://localhost:7890`.
 
-Revoke an engineer's `gw-user` cert → access gone (sshd re-reads KRL every connection).
+### 3. Behind a reverse proxy
 
-### 3. Behind a reverse proxy (advanced)
-
-If you must expose sshboard to the network directly, put it behind nginx / Caddy / Traefik with TLS + your existing SSO. sshboard does NOT include its own auth.
+To expose `sshboard` on a network, place it behind a proxy providing TLS and
+authentication. `sshboard` has none of its own.
 
 ```sh
 sshboard --bind 127.0.0.1:7890   # still localhost-bound; proxy in front
 ```
 
-sshboard will print a startup warning if you `--bind` to anything other than localhost.
+`--bind` to a non-loopback address prints a warning at startup.
 
 ## How it works
 
@@ -109,8 +114,8 @@ Auto-discovery, in order:
 
 1. `$SSHCA_CA_DIR` env var (matches sshca's convention)
 2. `$BASTIONHUB_CONFIG` env var
-3. `--ca-dir` and `--config` flags (override env) — *coming v0.1*
-4. Sensible defaults
+3. `--ca-dir` and `--config` flags, which override the environment
+4. The default paths above
 
 ## Stability promises
 
@@ -121,14 +126,19 @@ Post-1.0: [SemVer](https://semver.org/). The versioned surfaces will be:
 - **CLI flags** of the `sshboard` binary
 - **URL routes** the UI serves (relevant if you script against it)
 
-The interpretation of sshca's and bastionhub's data is delegated to those tools' own contract surfaces; if their schemas change in a breaking way, sshboard adjusts in a coordinated release.
+The formats `sshboard` reads are sshca's and bastionhub's contract surfaces, not
+its own.
 
 ## Roadmap
 
-- **v0.1** — Real cert table (parse JSONL, render sortable, click-to-revoke). Real endpoint table (parse YAML, query live state, click-to-SSH-via-copy-to-clipboard).
-- **v0.2** — Cross-cut "expiring in 24h" dashboard. Audit log browse with filters. Sshd auth log integration when running on a bastion.
-- **v0.3** — Bastion-deployment polish: documented systemd / launchd units, dogfood-pattern recipes, audit-log-sync mechanism so cert view lights up even when sshboard runs on the bastion (not the laptop).
-- **Later** — `roles.yaml` policy view if a roles file is detected. Multi-tenant view when there's a real product context.
+- Click-to-renew on the certificates view, mirroring revoke.
+- A certificate inspection dialog rendering `ssh-keygen -L` output.
+- Filtering on the certificates view by key ID and status.
+- An audit log view, ordered chronologically, filterable by principal, CA and date.
+- systemd and launchd units for running on a bastion.
+- Reading the issuance log when `sshboard` runs on the bastion and the log is on
+  the operator's machine. Currently the certificates view is empty in that
+  arrangement.
 
 ## License
 

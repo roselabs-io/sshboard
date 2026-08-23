@@ -18,12 +18,12 @@ Operator console for [sshca](https://github.com/roselabs-io/sshca) and [bastionh
 
 - A CA. Never touches CA private keys. Reads sshca's audit log + shells out to `sshca cert revoke / renew`.
 - A bastion. Never opens SSH connections itself. Shells out to `bastionhub ssh / status`.
-- An auth system. Bundles a random startup token (Jupyter-style) as a drive-by defense. For network exposure, expects SSH-LocalForward dogfood or a reverse proxy.
+- An authentication system. The random startup token only prevents other local processes from reaching the port. Network exposure requires an SSH local forward or a reverse proxy.
 
 ## Key principles
 
 1. **Single binary, no JS build.** Go server + embedded templates + vendored HTMX + Pico. `go build` produces the entire app. Matches the substrate aesthetic.
-2. **Substrate is the auth layer.** SSH cert auth (via bastionhub) is how operators reach sshboard in the dogfood pattern. sshboard itself binds localhost + a startup token.
+2. **Access control is external.** When run on a bastion, operators reach it over an SSH local forward, so the certificate granting SSH access also governs this. sshboard binds loopback and adds a startup token.
 3. **Graceful degradation.** sshca on PATH → Certs view lights up. bastionhub on PATH → Endpoints view lights up. Both → integrated views. Neither → useless, exits.
 4. **Shell out for actions; read files for state.** Reads sshca's JSONL log + bastionhub's `endpoints.yaml` directly (their documented contract surfaces). Calls `sshca cert revoke ...` / `bastionhub status` for mutations and live queries.
 5. **Server-rendered + HTMX for interactivity.** No SPA. Each action is `<form hx-post="/api/cert/revoke">` swapping a DOM fragment on response.
@@ -39,7 +39,7 @@ sshboard's reading of sshca's JSONL + bastionhub's YAML is delegated to those to
 
 ## Don't re-walk these
 
-- **Don't add auth code to sshboard.** SSH-LocalForward dogfood + reverse proxy handle it. Bundling auth would mean OAuth flows, password DB, session management — sshboard stays small by delegating. The startup token is a drive-by defense, not auth.
+- **Don't add authentication.** An SSH local forward or a reverse proxy covers it. Bundling auth would mean OAuth flows, a credential store and session management. The startup token is not authentication.
 - **Don't bind to a non-localhost address by default.** `--bind 127.0.0.1:7890` is the default for a reason. The warning on non-localhost bind is intentional and shouldn't be suppressed.
 - **Don't add a JS build step.** Vendored HTMX + Pico keep the single-binary aesthetic. If you want React, fork into a separate UI repo; don't bloat sshboard.
 - **Don't bundle sshca or bastionhub.** Calls them as subprocess. Loose coupling means version-independent. Detection at startup is the contract.

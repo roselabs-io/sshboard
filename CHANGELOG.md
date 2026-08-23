@@ -6,7 +6,7 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [0.1.0] — 2026-05-29
 
-First real release. Both views render live data; cert revoke ships via sshca; endpoint SSH commands copy to clipboard.
+Initial release. Both views render live data. Certificate revocation is delegated to sshca; endpoint SSH commands are copied to the clipboard.
 
 ### Added — Certs view
 
@@ -46,8 +46,8 @@ Initial scaffold. Not a release; the placeholder before v0.1 ships real function
 ### Added
 
 - HTTP server on `127.0.0.1:7890` by default (`--bind` to override, with a loud warning for non-localhost binds).
-- Random startup token gates all routes under `/t/<token>/` — Jupyter-style. Defends against drive-by from other localhost services.
-- CLI detection at startup: `sshca` and `bastionhub` on PATH light up the corresponding tabs; missing CLIs gray them out with install hints.
+- A random startup token gates all routes under `/t/<token>/`, so other processes on the same host cannot reach them by guessing the port.
+- CLI detection at startup: each view is enabled if its binary is on `PATH`, and disabled with an install hint otherwise.
 - Three view stubs: Home (welcome + detection status), Certs (placeholder), Endpoints (placeholder).
 - Embedded HTMX 1.9.12, Pico.css 2.0.6, custom `app.css`. Single binary; no JS build pipeline.
 - Cross-platform: builds clean for `linux/amd64`, `linux/arm64`, `darwin/amd64`, `darwin/arm64`, `windows/amd64`, `windows/arm64`.
