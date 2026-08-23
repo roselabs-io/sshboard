@@ -24,6 +24,7 @@ authentication. It reads two files and executes two binaries.
 
 ```sh
 brew tap roselabs-io/tools
+brew trust roselabs-io/tools   # recent Homebrew refuses third-party taps otherwise
 brew install sshboard
 # requires sshca and/or bastionhub also installed:
 brew install sshca bastionhub
