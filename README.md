@@ -92,6 +92,10 @@ Host bastion
 `ssh bastion` opens the forward; the interface is then at
 `http://localhost:7890`.
 
+In this arrangement the certificates view is empty: `sshboard` reads sshca's
+issuance log from the local filesystem, and that log is on the machine holding
+the CA, not on the bastion. The endpoints view is unaffected.
+
 ### 3. Behind a reverse proxy
 
 To expose `sshboard` on a network, place it behind a proxy providing TLS and
@@ -128,17 +132,6 @@ Post-1.0: [SemVer](https://semver.org/). The versioned surfaces will be:
 
 The formats `sshboard` reads are sshca's and bastionhub's contract surfaces, not
 its own.
-
-## Roadmap
-
-- Click-to-renew on the certificates view, mirroring revoke.
-- A certificate inspection dialog rendering `ssh-keygen -L` output.
-- Filtering on the certificates view by key ID and status.
-- An audit log view, ordered chronologically, filterable by principal, CA and date.
-- systemd and launchd units for running on a bastion.
-- Reading the issuance log when `sshboard` runs on the bastion and the log is on
-  the operator's machine. Currently the certificates view is empty in that
-  arrangement.
 
 ## License
 
