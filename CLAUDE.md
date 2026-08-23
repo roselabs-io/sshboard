@@ -1,81 +1,52 @@
-# sshboard — contributor / agent context
+# sshboard — contributor notes
 
-Operator console for [sshca](https://github.com/roselabs-io/sshca) and [bastionhub](https://github.com/roselabs-io/bastionhub). HTMX + Go. Single binary; serves a server-rendered web UI from embedded templates + vendored static assets. No JS build pipeline.
+A web interface over [sshca](https://github.com/roselabs-io/sshca) and
+[bastionhub](https://github.com/roselabs-io/bastionhub). Go and HTMX, single
+binary. Server-rendered from embedded templates and vendored static assets;
+there is no JavaScript build step.
 
-## Read order
+It reads two files and runs two binaries. It holds no CA keys, opens no SSH
+connections, and has no authentication.
 
-1. This file
-2. [README.md](README.md) — install + Quick start + Deployment patterns
-3. [CHANGELOG.md](CHANGELOG.md) — per-release changes
-4. [main.go](main.go) — http server, template loading, detection logic, token gate
-5. [templates/](templates/) + [static/](static/) — the UI
+## Scope
 
-## Project shape
+Out of scope, deliberately:
 
-**What this is:** a thin operator UI over the SSH-substrate CLIs. Renders relational views the CLI handles awkwardly (who-has-what-on-what); shells out to the CLIs for actions (revoke, renew, ssh). Substrate-adjacent — not part of either CLI, not the gateway product.
+- **Certificate authority.** Reads sshca's issuance log; calls
+  `sshca cert revoke` and `sshca cert renew` for actions.
+- **SSH.** Calls `bastionhub ssh` and `bastionhub status`.
+- **Authentication.** The random startup token only prevents other processes on
+  the same host from reaching the port. Network exposure requires an SSH local
+  forward or a reverse proxy in front.
+- **A JavaScript build.** HTMX and Pico are vendored.
+- **Bundling the CLIs.** They are called as subprocesses and detected at
+  startup, which keeps their versions independent of this one.
 
-**What this isn't:**
+## Contract surface
 
-- A CA. Never touches CA private keys. Reads sshca's audit log + shells out to `sshca cert revoke / renew`.
-- A bastion. Never opens SSH connections itself. Shells out to `bastionhub ssh / status`.
-- An authentication system. The random startup token only prevents other local processes from reaching the port. Network exposure requires an SSH local forward or a reverse proxy.
+Two versioned surfaces, from v1.0:
 
-## Key principles
+- **CLI flags** — `--bind`, `--ca-dir`, `--config`.
+- **URL routes** — `/`, `/t/<token>/`, `/t/<token>/certs`,
+  `/t/<token>/endpoints`, relevant if scripted against.
 
-1. **Single binary, no JS build.** Go server + embedded templates + vendored HTMX + Pico. `go build` produces the entire app. Matches the substrate aesthetic.
-2. **Access control is external.** When run on a bastion, operators reach it over an SSH local forward, so the certificate granting SSH access also governs this. sshboard binds loopback and adds a startup token.
-3. **Graceful degradation.** sshca on PATH → Certs view lights up. bastionhub on PATH → Endpoints view lights up. Both → integrated views. Neither → useless, exits.
-4. **Shell out for actions; read files for state.** Reads sshca's JSONL log + bastionhub's `endpoints.yaml` directly (their documented contract surfaces). Calls `sshca cert revoke ...` / `bastionhub status` for mutations and live queries.
-5. **Server-rendered + HTMX for interactivity.** No SPA. Each action is `<form hx-post="/api/cert/revoke">` swapping a DOM fragment on response.
+The formats it reads are sshca's and bastionhub's contract surfaces, not its
+own; a breaking change there is handled in a coordinated release.
 
-## Contract surface (semver-disciplined)
+## Constraints worth knowing
 
-Two versioned surfaces, both post-v1.0:
-
-- **CLI flags** of the `sshboard` binary (`--bind`, future `--ca-dir`, `--config`)
-- **URL routes** the UI serves (`/`, `/t/<token>/`, `/t/<token>/certs`, `/t/<token>/endpoints`, future `/api/...`) — relevant if you script against it
-
-sshboard's reading of sshca's JSONL + bastionhub's YAML is delegated to those tools' own contract surfaces; coordinated major bumps if their schemas change in a breaking way.
-
-## Don't re-walk these
-
-- **Don't add authentication.** An SSH local forward or a reverse proxy covers it. Bundling auth would mean OAuth flows, a credential store and session management. The startup token is not authentication.
-- **Don't bind to a non-localhost address by default.** `--bind 127.0.0.1:7890` is the default for a reason. The warning on non-localhost bind is intentional and shouldn't be suppressed.
-- **Don't add a JS build step.** Vendored HTMX + Pico keep the single-binary aesthetic. If you want React, fork into a separate UI repo; don't bloat sshboard.
-- **Don't bundle sshca or bastionhub.** Calls them as subprocess. Loose coupling means version-independent. Detection at startup is the contract.
-
-## File structure
-
-```
-sshboard/
-├── README.md           # public face: install, deployment patterns
-├── CHANGELOG.md        # per-release
-├── CLAUDE.md           # this file
-├── LICENSE             # MIT
-├── main.go             # http server + detection + template render + token gate
-├── go.mod / go.sum
-├── templates/          # *.html.tmpl, embedded via go:embed
-│   ├── layout.html.tmpl
-│   ├── index.html.tmpl
-│   ├── certs.html.tmpl
-│   └── endpoints.html.tmpl
-├── static/             # embedded via go:embed
-│   ├── htmx.min.js     # vendored htmx 1.9.x
-│   ├── pico.min.css    # vendored pico 2.0.x
-│   └── app.css         # custom layout overrides
-└── .github/workflows/  # CI + release (matches sshca + bastionhub pattern)
-```
+- **The default bind is `127.0.0.1:7890`.** The warning printed on a
+  non-loopback bind is intentional.
+- **Each view requires its binary on `PATH`.** With neither present the process
+  exits.
+- **State is read from files; actions shell out.** The issuance log and
+  `endpoints.yaml` are read directly. Mutations and live queries go through the
+  CLIs.
+- **`version` in `main.go` is a `var`, not a `const`**, so release builds can
+  inject the tag with `-ldflags "-X main.version=<tag>"`.
 
 ## Conventions
 
-- **Filenames:** kebab-case for docs, `.html.tmpl` for templates, `.css` / `.js` for static
-- **Dates:** ISO `YYYY-MM-DD`
-- **No YAML frontmatter** on Markdown docs
-- **Version variable** in `main.go` is `var` not `const` so release builds inject the tag via `-ldflags "-X main.version=<tag>"`
-- **Template inheritance** via Go's `{{block}}` directive. `layout.html.tmpl` defines `{{block "content" .}}{{end}}`; each view template defines `{{define "content"}}...{{end}}`. Each view is loaded as `[layout, view]` and rendered as the `"layout"` template.
-
-## See also
-
-- [sshca](https://github.com/roselabs-io/sshca) — cert tool sshboard reads + shells out to
-- [bastionhub](https://github.com/roselabs-io/bastionhub) — bastion tool sshboard reads + shells out to
-- Internal design notes, roadmap, current operational state live in a private workspace (not public).
+- Filenames: kebab-case.
+- Dates: ISO `YYYY-MM-DD`.
+- No YAML frontmatter in Markdown.
