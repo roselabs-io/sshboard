@@ -19,6 +19,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -455,24 +456,123 @@ func (a *app) certs(w http.ResponseWriter, _ *http.Request) {
 	a.render(w, "certs", extra)
 }
 
-func (a *app) endpoints(w http.ResponseWriter, _ *http.Request) {
-	extra := map[string]any{}
+// endpointsExtra returns the Endpoints view's data: the endpoints, or an Error,
+// and the values to prefill the enroll form with (none).
+func (a *app) endpointsExtra() map[string]any {
+	extra := map[string]any{"EnrollForm": url.Values{}}
 	if a.detected.Bastionhub == "" {
 		extra["Error"] = "bastionhub not detected on PATH."
-		a.render(w, "endpoints", extra)
-		return
+		return extra
 	}
 	views, err := readEndpoints(a.bastionhubConfig, a.detected.Bastionhub)
 	if err != nil {
 		extra["Error"] = fmt.Sprintf("Reading %s: %v", a.bastionhubConfig, err)
-		a.render(w, "endpoints", extra)
-		return
+		return extra
 	}
 	for i := range views {
 		views[i].Token = a.token
 	}
 	extra["Endpoints"] = views
-	a.render(w, "endpoints", extra)
+	return extra
+}
+
+func (a *app) endpoints(w http.ResponseWriter, _ *http.Request) {
+	a.render(w, "endpoints", a.endpointsExtra())
+}
+
+// endpointResult is the outcome of an endpoint action, shown above the table.
+type endpointResult struct {
+	Title  string
+	Output string
+	Failed bool
+}
+
+// runBastionhub runs bastionhub with BASTIONHUB_CONFIG set to the file the
+// Endpoints view reads; bastionhub has no flag for the config path.
+func (a *app) runBastionhub(args ...string) ([]byte, error) {
+	cmd := exec.Command(a.detected.Bastionhub, args...)
+	cmd.Env = append(os.Environ(), "BASTIONHUB_CONFIG="+a.bastionhubConfig)
+	return cmd.CombinedOutput()
+}
+
+// renderEndpointsResult writes the Endpoints view's content fragment, re-read
+// after the action, with the action's result above the table and the enroll
+// form prefilled with form. Status is 200 also on failure, so that HTMX swaps.
+func (a *app) renderEndpointsResult(w http.ResponseWriter, res endpointResult, form url.Values) {
+	extra := a.endpointsExtra()
+	extra["Result"] = res
+	if form != nil {
+		extra["EnrollForm"] = form
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := a.tmpl.ExecuteTemplate(w, "endpoints-content", a.viewData("endpoints", extra)); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+// enrollFlags are the optional `bastionhub endpoint enroll` flags the enroll
+// form submits, each under the flag's name; an empty field omits the flag.
+var enrollFlags = []string{"pubkey-file", "user", "port", "identity", "description", "valid", "principal"}
+
+// enrollEndpoint handles POST /t/<token>/api/endpoint/enroll
+// Form: name and the fields of enrollFlags. Runs `bastionhub endpoint enroll`
+// with --ca-dir set to sshboard's CA dir. Flags are passed as --flag=value so
+// that a value starting with "-" is not parsed as a flag.
+// Returns: the Endpoints view's content fragment with bastionhub's output; on
+// failure the form keeps the submitted values.
+func (a *app) enrollEndpoint(w http.ResponseWriter, r *http.Request) {
+	if a.detected.Bastionhub == "" {
+		http.Error(w, "bastionhub not detected", http.StatusServiceUnavailable)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	name := strings.TrimSpace(r.PostFormValue("name"))
+	if name == "" || strings.HasPrefix(name, "-") {
+		a.renderEndpointsResult(w, endpointResult{Title: "Enroll failed", Output: `The name is required and must not start with "-".`, Failed: true}, r.PostForm)
+		return
+	}
+	args := []string{"endpoint", "enroll", "--ca-dir=" + a.caDir}
+	for _, f := range enrollFlags {
+		if v := strings.TrimSpace(r.PostFormValue(f)); v != "" {
+			args = append(args, "--"+f+"="+v)
+		}
+	}
+	args = append(args, name)
+	out, err := a.runBastionhub(args...)
+	if err != nil {
+		a.renderEndpointsResult(w, endpointResult{Title: "Enroll failed for " + name, Output: string(out), Failed: true}, r.PostForm)
+		return
+	}
+	a.renderEndpointsResult(w, endpointResult{Title: "Enrolled " + name, Output: string(out)}, nil)
+}
+
+// unregisterEndpoint handles POST /t/<token>/api/endpoint/unregister
+// Form: name. Runs `bastionhub endpoint unregister <name>`, which removes the
+// endpoint from endpoints.yaml and does not revoke its certificate.
+// Returns: the Endpoints view's content fragment with bastionhub's output.
+func (a *app) unregisterEndpoint(w http.ResponseWriter, r *http.Request) {
+	if a.detected.Bastionhub == "" {
+		http.Error(w, "bastionhub not detected", http.StatusServiceUnavailable)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	name := r.PostFormValue("name")
+	if name == "" || strings.HasPrefix(name, "-") {
+		http.Error(w, "missing or invalid name", http.StatusBadRequest)
+		return
+	}
+	out, err := a.runBastionhub("endpoint", "unregister", name)
+	res := endpointResult{Title: "Unregistered " + name, Output: string(out)}
+	if err != nil {
+		res = endpointResult{Title: "Unregister failed for " + name, Output: string(out), Failed: true}
+	}
+	a.renderEndpointsResult(w, res, nil)
 }
 
 // revokeCert handles POST /t/<token>/api/cert/revoke
@@ -753,6 +853,8 @@ func main() {
 	mux.HandleFunc(prefix+"/api/cert/revoke", a.revokeCert)
 	mux.HandleFunc(prefix+"/api/cert/renew", a.renewCert)
 	mux.HandleFunc(prefix+"/api/cert/inspect", a.inspectCert)
+	mux.HandleFunc(prefix+"/api/endpoint/enroll", a.enrollEndpoint)
+	mux.HandleFunc(prefix+"/api/endpoint/unregister", a.unregisterEndpoint)
 
 	staticSub, err := fs.Sub(staticFS, "static")
 	if err != nil {
