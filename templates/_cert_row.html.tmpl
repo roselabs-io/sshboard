@@ -10,6 +10,13 @@
     </td>
     <td><small>{{.TimeLeft}}</small></td>
     <td>
+        <form hx-get="/t/{{.Token}}/api/cert/inspect"
+              hx-target="#cert-dialog">
+            <input type="hidden" name="key_id" value="{{.KeyID}}">
+            <input type="hidden" name="ca" value="{{.CA}}">
+            <input type="hidden" name="cert" value="{{.Cert}}">
+            <button type="submit" class="secondary outline small">Inspect</button>
+        </form>
         {{if and (ne .Status "REVOKED") (ne .Status "NEVER")}}
         <form hx-post="/t/{{.Token}}/api/cert/revoke"
               hx-target="#cert-row-{{.KeyID}}"
