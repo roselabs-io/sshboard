@@ -57,7 +57,8 @@ fork does not receive.
 
 A PR from a branch `agent/<N>-…` carries exactly one `Sshboard-Issue: #N` line; a dispatched run
 also requires a `Sshboard-Agent` line naming a configured lane. `validate` of `sshboard-ci.yml`
-checks both. `sshboard-pm.yml` moves issue N on the board from that line. `autonomy: gated`: every
+checks both. `sshboard-pm.yml` moves issue N on the board from that line. `autonomy: tiered`: an
+approved PR merges through the merge queue, except the PR of a complex or exceptional ticket, whose
 merge is left to a person.
 
 A change to the CLI flags or the URL routes is a contract change (`CLAUDE.md`, Contract surface)
