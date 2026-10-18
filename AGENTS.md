@@ -22,6 +22,8 @@ Templates and static assets are embedded with `go:embed`; there is no JavaScript
 | `.github/workflows/release.yml` | on a `v*` tag: builds six targets, archives, `checksums.txt`, a GitHub Release |
 | `.github/workflows/sshboard-ci.yml` | `validate` (PR metadata) and `gate` (`just gate`) |
 | `.github/workflows/sshboard-pm.yml` | the issue and board sync of Governor |
+| `.github/workflows/audit.yml` | `just audit` on a change to `go.mod` or `go.sum`, and weekly on `main` |
+| `.secrets.baseline` | the detect-secrets findings that are not secrets, read by `just scan` |
 | `pipeline.yaml` | the Governor dispatcher's config for this repository |
 | `tools/local_preflight.py` | the local check the dispatcher runs: `just check`, then `just gate` |
 
@@ -37,14 +39,44 @@ recorded in this repository.
 | `just check` | `go vet ./...`; fails when `gofmt -l .` lists a file |
 | `just test` | `go test ./...` |
 | `just build` | `go build` with `CGO_ENABLED=0` for linux, darwin and windows on amd64 and arm64, into a temporary directory |
-| `just gate` | `check`, `test`, `build`; the deterministic gate CI runs |
+| `just scan` | `detect-secrets scan --no-verify` (detect-secrets 1.5.0, through `uvx`) of the tracked files; fails on a finding not in `.secrets.baseline` |
+| `just audit` | `govulncheck ./...` (govulncheck v1.9.0, through `go run`); needs the network and is not part of the gate |
+| `just gate` | `check`, `scan`, `test`, `build`; the deterministic gate CI runs |
 | `just fix` | `gofmt -w .` |
 | `just ff` | switches to `main` and fast-forwards it from `origin`; refuses local changes or a diverged `main` |
 
 `up`, `down` and `logs` are not applicable (`checks.recipes.not_applicable` of `pipeline.yaml`):
-there is no local stack. `just` and Go are required.
+there is no local stack. `just`, Go and uv (for `uvx`) are required. `uvx` downloads detect-secrets
+and `go run` downloads govulncheck on their first run.
 
-The gate does not scan for secrets, and there is no `audit` recipe (sshboard#2).
+### Secret scan
+
+`just scan` runs `detect-secrets scan` over the files `git ls-files` lists (tracked and staged),
+except `.secrets.baseline`. `--no-verify` disables the plugins' network verification. A finding is
+its file, detector type and hash; the recipe exits 1 and prints each finding of the scan that
+`.secrets.baseline` does not list. Line numbers are not compared, so moving a baselined line does not
+fail the scan. `.secrets.baseline` currently lists no finding.
+
+After confirming that a new finding is not a secret, regenerate the baseline:
+
+```sh
+uvx --from detect-secrets==1.5.0 detect-secrets scan --no-verify --exclude-files '^\.secrets\.baseline$' > .secrets.baseline
+```
+
+Limitations:
+
+- Untracked files and Git history are not scanned.
+- detect-secrets matches patterns, keywords and string entropy. A secret of a format it has no
+  detector for, with entropy under the Base64 (4.5) and hex (3.0) limits, and not assigned to a
+  keyword, is not found.
+
+### Dependency audit
+
+`just audit` runs govulncheck over `./...`: it reports the advisories of the Go vulnerability
+database (vuln.go.dev) whose vulnerable symbols the code reaches, in the required modules and in the
+standard library of the Go toolchain that runs it, and exits non-zero when it finds one. Locally that
+toolchain is the installed `go`; in `audit.yml` it is the version of `go.mod`. A finding is triaged
+like a review finding: a fix, or a recorded disposition with its follow-up issue.
 
 ## CI
 
