@@ -20,6 +20,18 @@
             <input type="hidden" name="principals" value="{{.Principals}}">
             <button type="submit" class="secondary outline small">Revoke</button>
         </form>
+        {{if .PubkeyAvailable}}
+        <form hx-post="/t/{{.Token}}/api/cert/renew"
+              hx-target="#cert-row-{{.KeyID}}"
+              hx-swap="outerHTML"
+              hx-prompt="Renew cert {{.KeyID}} ({{.Principals}})? sshca signs {{.Pubkey}} again with its default validity. Optional scp target for the new cert (empty: do not ship):">
+            <input type="hidden" name="key_id" value="{{.KeyID}}">
+            <input type="hidden" name="ca" value="{{.CA}}">
+            <button type="submit" class="secondary outline small">Renew</button>
+        </form>
+        {{else}}
+        <small class="muted" title="{{.Pubkey}}">Renew: pubkey file not found</small>
+        {{end}}
         {{end}}
     </td>
 </tr>

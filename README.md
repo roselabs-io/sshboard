@@ -122,6 +122,28 @@ Auto-discovery, in order:
 3. `--ca-dir` and `--config` flags, which override the environment
 4. The default paths above
 
+### Renewing a certificate
+
+Each certificate row with an expiry has a Renew action next to Revoke. It runs:
+
+```sh
+sshca cert renew --ca <ca> --pubkey-file <pubkey> --dir <ca-dir> [--ship <target>]
+```
+
+- `<pubkey>` is the `pubkey` field of the row's issuance-log entry: the path
+  passed to sshca when the certificate was signed. A relative path resolves
+  against sshboard's working directory.
+- The confirmation prompt asks for an optional scp target; an empty answer runs
+  without `--ship`, Cancel runs nothing. A target starting with `-` is rejected.
+- Principals and validity are sshca's defaults for `cert renew`: principals read
+  from the existing `<pubkey>-cert.pub`, validity `+8h`.
+- On success the row is replaced by the new certificate's row followed by the
+  renewed one. The renewed certificate is not revoked.
+- A row whose pubkey file does not exist on the sshboard host shows
+  "Renew: pubkey file not found" instead of the action. This is the case when
+  the certificate was signed on another machine or from another working
+  directory.
+
 ## Stability promises
 
 Pre-1.0: minor releases may break things. Breaking changes will be called out in [CHANGELOG.md](CHANGELOG.md) with the rationale.
