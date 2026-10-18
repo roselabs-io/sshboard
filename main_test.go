@@ -1,6 +1,11 @@
 package main
 
 import (
+	"fmt"
+	"html/template"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -155,4 +160,93 @@ func TestParseBastionhubStatus_NoHeader(t *testing.T) {
 	}
 	// silence unused import vars if test changes
 	_ = strings.Contains
+}
+
+// renewFixture writes a CA dir whose log holds one +8h entry for a pubkey that
+// exists and one for a pubkey that does not, and a fake sshca that records its
+// arguments and appends a renewed entry the way `sshca cert renew` does.
+func renewFixture(t *testing.T) (*app, string) {
+	t.Helper()
+	dir := t.TempDir()
+	pub := filepath.Join(dir, "alice.pub")
+	if err := os.WriteFile(pub, []byte("ssh-ed25519 AAAA alice\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ts := time.Now().UTC().Add(-time.Hour).Format(time.RFC3339)
+	log := fmt.Sprintf(`{"ts":%q,"ca":"user","key_id":"alice-old","principals":"alice","valid":"+8h","pubkey":%q,"cert":"x"}
+{"ts":%q,"ca":"user","key_id":"bob-old","principals":"bob","valid":"+8h","pubkey":%q,"cert":"y"}
+`, ts, pub, ts, filepath.Join(dir, "missing.pub"))
+	if err := os.WriteFile(filepath.Join(dir, "issuance-log.jsonl"), []byte(log), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sshca := filepath.Join(dir, "sshca")
+	script := fmt.Sprintf(`#!/bin/sh
+printf '%%s\n' "$@" > %q
+printf '{"ts":"%%s","ca":"user","key_id":"alice-new","principals":"alice","valid":"+8h","pubkey":%q,"cert":"x"}\n' "$(date -u +%%Y-%%m-%%dT%%H:%%M:%%SZ)" >> %q
+echo "cert renewed"
+`, filepath.Join(dir, "args"), pub, filepath.Join(dir, "issuance-log.jsonl"))
+	if err := os.WriteFile(sshca, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	tmpl := template.Must(template.ParseFS(templatesFS, "templates/*.html.tmpl"))
+	return &app{detected: detected{Sshca: sshca}, tmpl: tmpl, token: "tok", caDir: dir}, dir
+}
+
+func TestCertsRenderRenewOnlyWithPubkeyFile(t *testing.T) {
+	a, _ := renewFixture(t)
+	rec := httptest.NewRecorder()
+	a.certs(rec, httptest.NewRequest("GET", "/t/tok/certs", nil))
+	body := rec.Body.String()
+	alice := body[strings.Index(body, `id="cert-row-alice-old"`):strings.Index(body, `id="cert-row-bob-old"`)]
+	bob := body[strings.Index(body, `id="cert-row-bob-old"`):]
+	if !strings.Contains(alice, "/api/cert/renew") {
+		t.Errorf("alice row has no Renew action:\n%s", alice)
+	}
+	if strings.Contains(bob, "/api/cert/renew") || !strings.Contains(bob, "pubkey file not found") {
+		t.Errorf("bob row (missing pubkey) should show no Renew action:\n%s", bob)
+	}
+}
+
+func TestRenewCert(t *testing.T) {
+	cases := []struct {
+		name     string
+		keyID    string
+		ship     string
+		wantCode int
+		wantArgs string // "" = sshca must not run
+	}{
+		{"local", "alice-old", "", 200, "cert renew --ca user --pubkey-file PUB --dir DIR"},
+		{"ship", "alice-old", "alice@laptop:/home/alice/.ssh/", 200, "cert renew --ca user --pubkey-file PUB --dir DIR --ship alice@laptop:/home/alice/.ssh/"},
+		{"ship option rejected", "alice-old", "-oProxyCommand=x", 400, ""},
+		{"unknown key_id", "nobody", "", 404, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			a, dir := renewFixture(t)
+			req := httptest.NewRequest("POST", "/t/tok/api/cert/renew", strings.NewReader("key_id="+c.keyID+"&ca=user"))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			req.Header.Set("HX-Prompt", c.ship)
+			rec := httptest.NewRecorder()
+			a.renewCert(rec, req)
+			if rec.Code != c.wantCode {
+				t.Fatalf("status = %d, want %d: %s", rec.Code, c.wantCode, rec.Body)
+			}
+			args, err := os.ReadFile(filepath.Join(dir, "args"))
+			if c.wantArgs == "" {
+				if err == nil {
+					t.Fatalf("sshca ran with %q", args)
+				}
+				return
+			}
+			want := strings.NewReplacer("PUB", filepath.Join(dir, "alice.pub"), "DIR", dir).Replace(c.wantArgs)
+			if got := strings.Join(strings.Fields(string(args)), " "); got != want {
+				t.Errorf("sshca args = %q, want %q", got, want)
+			}
+			body := rec.Body.String()
+			newRow, oldRow := strings.Index(body, `id="cert-row-alice-new"`), strings.Index(body, `id="cert-row-alice-old"`)
+			if newRow < 0 || oldRow < newRow {
+				t.Errorf("want the new row, then the renewed row:\n%s", body)
+			}
+		})
+	}
 }

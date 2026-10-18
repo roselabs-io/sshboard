@@ -83,13 +83,14 @@ type logEntry struct {
 // Token is the URL token (so the per-row template can build hx-post URLs).
 type CertView struct {
 	logEntry
-	ExpiresAt      time.Time
-	HasExpiry      bool
-	TimeLeft       string // human-readable, e.g. "3h53m0s" or "-14h0m0s"
-	Status         string // ACTIVE | EXPIRING | EXPIRED | NEVER | REVOKED
-	StatusClass    string // pico-friendly CSS class
-	PrincipalsList []string
-	Token          string // URL token for hx-post action endpoints
+	ExpiresAt       time.Time
+	HasExpiry       bool
+	TimeLeft        string // human-readable, e.g. "3h53m0s" or "-14h0m0s"
+	Status          string // ACTIVE | EXPIRING | EXPIRED | NEVER | REVOKED
+	StatusClass     string // pico-friendly CSS class
+	PrincipalsList  []string
+	PubkeyAvailable bool   // the entry's pubkey file exists here; Renew needs it
+	Token           string // URL token for hx-post action endpoints
 }
 
 // parseSSHKeygenDuration parses ssh-keygen -V style durations. Mirrors the same
@@ -165,18 +166,14 @@ func formatTimeLeft(d time.Duration) string {
 	return sign + d.Truncate(time.Minute).String()
 }
 
-// readCerts parses the JSONL audit log at caDir/issuance-log.jsonl, computes
-// expiry for each entry, and returns the enriched list. Sorted by expiry
-// ascending (most-urgent first); never-expiring entries go last.
-func readCerts(caDir string, expiringWindow time.Duration) ([]CertView, error) {
-	path := filepath.Join(caDir, "issuance-log.jsonl")
-	data, err := os.ReadFile(path)
+// readLog parses the JSONL audit log at caDir/issuance-log.jsonl and returns
+// its entries in file order. Lines that are not valid JSON are skipped.
+func readLog(caDir string) ([]logEntry, error) {
+	data, err := os.ReadFile(filepath.Join(caDir, "issuance-log.jsonl"))
 	if err != nil {
 		return nil, err
 	}
-	now := time.Now().UTC()
-
-	var views []CertView
+	var entries []logEntry
 	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
 		if line == "" {
 			continue
@@ -185,30 +182,57 @@ func readCerts(caDir string, expiringWindow time.Duration) ([]CertView, error) {
 		if err := json.Unmarshal([]byte(line), &entry); err != nil {
 			continue
 		}
-		v := CertView{logEntry: entry}
-		v.PrincipalsList = strings.Split(entry.Principals, ",")
-		exp, has, _ := parseExpiry(entry.Valid, entry.TS)
-		v.ExpiresAt = exp
-		v.HasExpiry = has
-		switch {
-		case !has:
-			v.Status = "NEVER"
-			v.StatusClass = "muted"
-			v.TimeLeft = "—"
-		case !exp.After(now):
-			v.Status = "EXPIRED"
-			v.StatusClass = "status-expired"
-			v.TimeLeft = formatTimeLeft(exp.Sub(now))
-		case exp.Before(now.Add(expiringWindow)):
-			v.Status = "EXPIRING"
-			v.StatusClass = "status-expiring"
-			v.TimeLeft = formatTimeLeft(exp.Sub(now))
-		default:
-			v.Status = "ACTIVE"
-			v.StatusClass = "status-active"
-			v.TimeLeft = formatTimeLeft(exp.Sub(now))
-		}
-		views = append(views, v)
+		entries = append(entries, entry)
+	}
+	return entries, nil
+}
+
+// newCertView computes the display fields of one log entry at time now.
+// PubkeyAvailable is true when the entry's pubkey path names a regular file on
+// this host; a relative path resolves against sshboard's working directory.
+func newCertView(entry logEntry, now time.Time, expiringWindow time.Duration) CertView {
+	v := CertView{logEntry: entry}
+	v.PrincipalsList = strings.Split(entry.Principals, ",")
+	if fi, err := os.Stat(entry.Pubkey); err == nil && fi.Mode().IsRegular() {
+		v.PubkeyAvailable = true
+	}
+	exp, has, _ := parseExpiry(entry.Valid, entry.TS)
+	v.ExpiresAt = exp
+	v.HasExpiry = has
+	switch {
+	case !has:
+		v.Status = "NEVER"
+		v.StatusClass = "muted"
+		v.TimeLeft = "—"
+	case !exp.After(now):
+		v.Status = "EXPIRED"
+		v.StatusClass = "status-expired"
+		v.TimeLeft = formatTimeLeft(exp.Sub(now))
+	case exp.Before(now.Add(expiringWindow)):
+		v.Status = "EXPIRING"
+		v.StatusClass = "status-expiring"
+		v.TimeLeft = formatTimeLeft(exp.Sub(now))
+	default:
+		v.Status = "ACTIVE"
+		v.StatusClass = "status-active"
+		v.TimeLeft = formatTimeLeft(exp.Sub(now))
+	}
+	return v
+}
+
+// readCerts reads the audit log, computes expiry for each entry, and returns
+// the enriched list. Sorted by expiry ascending (most-urgent first);
+// never-expiring entries go last.
+func readCerts(caDir string, expiringWindow time.Duration) ([]CertView, error) {
+	entries, err := readLog(caDir)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+
+	var views []CertView
+	for _, entry := range entries {
+		views = append(views, newCertView(entry, now, expiringWindow))
 	}
 
 	// Sort: by ExpiresAt ascending; never-expiring entries last.
@@ -502,6 +526,89 @@ func (a *app) revokeCert(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// renewCert handles POST /t/<token>/api/cert/renew
+// Form: key_id, ca. Header HX-Prompt: optional scp target for the new cert.
+// The pubkey file is the one the issuance log records for the entry, never a
+// path from the request.
+// Returns: HTML fragment of the new cert's row followed by the renewed row.
+func (a *app) renewCert(w http.ResponseWriter, r *http.Request) {
+	if a.detected.Sshca == "" {
+		http.Error(w, "sshca not detected", http.StatusServiceUnavailable)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	keyID := r.FormValue("key_id")
+	ca := r.FormValue("ca")
+	if keyID == "" || (ca != "user" && ca != "host") {
+		http.Error(w, "missing or invalid key_id / ca", http.StatusBadRequest)
+		return
+	}
+	ship := strings.TrimSpace(r.Header.Get("HX-Prompt"))
+	// scp parses a destination starting with "-" as an option.
+	if strings.HasPrefix(ship, "-") {
+		http.Error(w, "invalid ship target", http.StatusBadRequest)
+		return
+	}
+
+	before, err := readLog(a.caDir)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	var entry *logEntry
+	for i := range before {
+		if before[i].KeyID == keyID && before[i].CA == ca {
+			entry = &before[i]
+		}
+	}
+	if entry == nil {
+		http.Error(w, "no issuance log entry for key_id", http.StatusNotFound)
+		return
+	}
+
+	args := []string{"cert", "renew", "--ca", ca, "--pubkey-file", entry.Pubkey, "--dir", a.caDir}
+	if ship != "" {
+		args = append(args, "--ship", ship)
+	}
+	out, err := exec.Command(a.detected.Sshca, args...).CombinedOutput()
+	if err != nil {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusBadGateway)
+		fmt.Fprintf(w, `<tr><td colspan="7"><article class="error"><strong>Renew failed for %s:</strong><pre>%s</pre></article></td></tr>`,
+			template.HTMLEscapeString(keyID),
+			template.HTMLEscapeString(string(out)),
+		)
+		return
+	}
+
+	after, err := readLog(a.caDir)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	now := time.Now().UTC()
+	var rows []CertView
+	// sshca appends the new entry with the pubkey path it was given.
+	for i := len(after) - 1; i >= len(before); i-- {
+		if after[i].Pubkey == entry.Pubkey {
+			rows = append(rows, newCertView(after[i], now, 24*time.Hour))
+			break
+		}
+	}
+	rows = append(rows, newCertView(*entry, now, 24*time.Hour))
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	for _, v := range rows {
+		v.Token = a.token
+		if err := a.tmpl.ExecuteTemplate(w, "cert-row", v); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+}
+
 // -----------------------------------------------------------------------------
 // CA dir discovery
 // -----------------------------------------------------------------------------
@@ -596,6 +703,7 @@ func main() {
 	mux.HandleFunc(prefix+"/certs", a.certs)
 	mux.HandleFunc(prefix+"/endpoints", a.endpoints)
 	mux.HandleFunc(prefix+"/api/cert/revoke", a.revokeCert)
+	mux.HandleFunc(prefix+"/api/cert/renew", a.renewCert)
 
 	staticSub, err := fs.Sub(staticFS, "static")
 	if err != nil {
