@@ -6,10 +6,12 @@ binary.
 
 ## Overview
 
-`sshboard` renders two views and proxies actions to the two CLIs:
+`sshboard` renders three views and proxies actions to the two CLIs:
 
 - **Certificates** — sshca's issuance log as a table, with expiry state,
   filtered by `key_id` substring and by status.
+- **Log** — sshca's issuance log entry by entry, in order of time, filtered by
+  principal, CA and date range.
 - **Endpoints** — bastionhub's registry with live tunnel state and uptime.
 
 Actions run the CLIs: `sshca cert revoke`, `sshca cert renew`, `sshca cert
@@ -140,6 +142,30 @@ filters are query parameters of `/t/<token>/certs`:
 - The filter is not stored; it lives only in the URL. A row swapped in by
   Revoke or Renew stays on the page until it is reloaded, whether or not it
   matches the filter.
+
+### Issuance log
+
+The Log view lists every entry of `<ca-dir>/issuance-log.jsonl`, oldest first
+by `ts`, with the columns `ts`, `ca`, `key_id`, `principals`, `valid` and
+`cert`. Entries with the same `ts` keep their file order. It requires `sshca`
+on `PATH`, as the Certs view does, and does not write to the log.
+
+The filters are query parameters of `/t/<token>/log`, set by the form above the
+table:
+
+| Parameter | Values | Default |
+|---|---|---|
+| `principal` | one principal; matches entries that list it among their `principals` | empty: every principal |
+| `ca` | `ALL`, `user`, `host` | `ALL` |
+| `from` | date `YYYY-MM-DD`, inclusive | empty: no lower bound |
+| `to` | date `YYYY-MM-DD`, inclusive | empty: no upper bound |
+
+- Dates compare against the UTC date of `ts`.
+- An invalid `ca`, `from` or `to` returns `400 Bad Request`.
+- The principal list offers the principals present in the log. The match is
+  exact, not a substring.
+- An entry whose `ts` does not parse as RFC 3339 is listed first and is
+  excluded when `from` or `to` is set.
 
 ### Renewing a certificate
 

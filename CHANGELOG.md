@@ -6,6 +6,10 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — Log view
+
+- **Issuance log tab.** `/t/<token>/log` (new route) lists the issuance log entry by entry, oldest first, filtered by the query parameters `principal` (exact match), `ca` (`ALL`, `user`, `host`) and `from` / `to` (inclusive UTC dates, `YYYY-MM-DD`); an invalid `ca` or date returns 400. Read-only. See README, "Issuance log".
+
 ### Added — Certs view
 
 - **Filtering.** A search field filters rows by `key_id` substring (ignoring case) and status buttons by ACTIVE, EXPIRING, EXPIRED or ALL. Both are query parameters of `/t/<token>/certs`: `q` and `status` (default `ALL`; another value returns 400). See README, "Filtering certificates".

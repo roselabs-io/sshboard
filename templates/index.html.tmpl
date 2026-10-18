@@ -40,6 +40,15 @@
         {{end}}
     </article>
     <article>
+        <header><strong>Log</strong></header>
+        <p>The issuance log in order of time, filtered by principal, CA and date range.</p>
+        {{if .Detected.Sshca}}
+            <a href="/t/{{.Token}}/log" role="button">Open Log &rarr;</a>
+        {{else}}
+            <small><em>Requires sshca on PATH.</em></small>
+        {{end}}
+    </article>
+    <article>
         <header><strong>Endpoints</strong></header>
         <p>Configured endpoints, live tunnel status, click-to-SSH.</p>
         {{if .Detected.Bastionhub}}
