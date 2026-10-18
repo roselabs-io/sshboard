@@ -4,6 +4,12 @@ All notable changes to `sshboard` will be documented in this file.
 
 Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning is [SemVer](https://semver.org/) once we reach v1.0; until then, breaking changes can land in minor releases — see "Stability promises" in [README.md](README.md).
 
+## [Unreleased]
+
+### Added — Certs view
+
+- **Click-to-renew.** Each row with an expiry carries a Renew action that POSTs to `/t/<token>/api/cert/renew`; the server runs `sshca cert renew --ca <ca> --pubkey-file <pubkey> --dir <ca-dir>`, with `--ship <target>` when the confirmation prompt is answered with a target. The pubkey file is the entry's `pubkey` field in the issuance log. Rows whose pubkey file is not on the host show no Renew action. See README, "Renewing a certificate".
+
 ## [0.1.0] — 2026-05-29
 
 Initial release. Both views render live data. Certificate revocation is delegated to sshca; endpoint SSH commands are copied to the clipboard.
