@@ -16,6 +16,11 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Click-to-renew.** Each row with an expiry carries a Renew action that POSTs to `/t/<token>/api/cert/renew`; the server runs `sshca cert renew --ca <ca> --pubkey-file <pubkey> --dir <ca-dir>`, with `--ship <target>` when the confirmation prompt is answered with a target. The pubkey file is the entry's `pubkey` field in the issuance log. Rows whose pubkey file is not on the host show no Renew action. See README, "Renewing a certificate".
 - **Inspect dialog.** Each row carries an Inspect action that GETs `/t/<token>/api/cert/inspect`; the server runs `sshca cert inspect <cert>`, where `<cert>` is the entry's `cert` field in the issuance log, and returns a dialog holding the output. See README, "Inspecting a certificate".
 
+### Added — Endpoints view
+
+- **Enroll form.** An "Enroll an endpoint" form POSTs to `/t/<token>/api/endpoint/enroll`; the server runs `bastionhub endpoint enroll --ca-dir=<ca-dir> [--<flag>=<value> ...] <name>` with `BASTIONHUB_CONFIG` set to the endpoints.yaml the view reads. See README, "Enrolling an endpoint".
+- **Unregister.** Each row carries an Unregister action, behind a confirmation, that POSTs to `/t/<token>/api/endpoint/unregister`; the server runs `bastionhub endpoint unregister <name>`. The endpoint's certificate is not revoked. See README, "Unregistering an endpoint".
+
 ## [0.1.0] — 2026-05-29
 
 Initial release. Both views render live data. Certificate revocation is delegated to sshca; endpoint SSH commands are copied to the clipboard.

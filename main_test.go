@@ -379,6 +379,121 @@ func TestInspectCert(t *testing.T) {
 	}
 }
 
+// TestEndpointActions covers POST /api/endpoint/enroll and /unregister through
+// a fake bastionhub that records its arguments and, on success, rewrites the
+// file named by BASTIONHUB_CONFIG to hold one endpoint "new-ep". The response
+// is the #endpoints-view element re-read from that file, with bastionhub's output.
+func TestEndpointActions(t *testing.T) {
+	cases := []struct {
+		name       string
+		action     string
+		form       url.Values
+		exit       int
+		wantCode   int
+		wantArgs   string // "" = bastionhub must not run the action
+		wantFailed bool
+	}{
+		{"enroll, all fields", "enroll", url.Values{"name": {"web-01"}, "pubkey-file": {"/k/web.pub"}, "user": {"ops"}, "port": {"12005"}, "identity": {"~/.ssh/id"}, "description": {"web server"}, "valid": {"+4w"}, "principal": {"tun"}}, 0, 200,
+			"endpoint enroll --ca-dir=DIR --pubkey-file=/k/web.pub --user=ops --port=12005 --identity=~/.ssh/id --description=web server --valid=+4w --principal=tun web-01", false},
+		{"enroll, empty fields omitted", "enroll", url.Values{"name": {"web-01"}, "pubkey-file": {"/k/web.pub"}, "user": {""}}, 0, 200,
+			"endpoint enroll --ca-dir=DIR --pubkey-file=/k/web.pub web-01", false},
+		{"enroll, bastionhub fails", "enroll", url.Values{"name": {"web-01"}, "pubkey-file": {"/k/web.pub"}}, 1, 200,
+			"endpoint enroll --ca-dir=DIR --pubkey-file=/k/web.pub web-01", true},
+		{"enroll, name starting with -", "enroll", url.Values{"name": {"--help"}, "pubkey-file": {"/k/web.pub"}}, 0, 200, "", true},
+		{"unregister", "unregister", url.Values{"name": {"old-ep"}}, 0, 200, "endpoint unregister old-ep", false},
+		{"unregister, bastionhub fails", "unregister", url.Values{"name": {"old-ep"}}, 1, 200, "endpoint unregister old-ep", true},
+		{"unregister, name starting with -", "unregister", url.Values{"name": {"-x"}}, 0, 400, "", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			config := filepath.Join(dir, "endpoints.yaml")
+			if err := os.WriteFile(config, []byte("endpoints:\n  old-ep: {port: 12001, user: root}\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			bastionhub := filepath.Join(dir, "bastionhub")
+			script := fmt.Sprintf(`#!/bin/sh
+[ "$1" = status ] && exit 0
+printf '%%s\n' "$@" > %q
+echo 'bastionhub <output>'
+[ %d -ne 0 ] && exit %d
+printf 'endpoints:\n  new-ep: {port: 12002, user: root}\n' > "$BASTIONHUB_CONFIG"
+`, filepath.Join(dir, "args"), c.exit, c.exit)
+			if err := os.WriteFile(bastionhub, []byte(script), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			tmpl := template.Must(template.ParseFS(templatesFS, "templates/*.html.tmpl"))
+			a := &app{detected: detected{Bastionhub: bastionhub}, tmpl: tmpl, token: "tok", caDir: dir, bastionhubConfig: config}
+
+			req := httptest.NewRequest("POST", "/t/tok/api/endpoint/"+c.action, strings.NewReader(c.form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			rec := httptest.NewRecorder()
+			if c.action == "enroll" {
+				a.enrollEndpoint(rec, req)
+			} else {
+				a.unregisterEndpoint(rec, req)
+			}
+			if rec.Code != c.wantCode {
+				t.Fatalf("status = %d, want %d: %s", rec.Code, c.wantCode, rec.Body)
+			}
+			body := rec.Body.String()
+			args, err := os.ReadFile(filepath.Join(dir, "args"))
+			if c.wantArgs == "" {
+				if err == nil {
+					t.Fatalf("bastionhub ran with %q", args)
+				}
+			} else {
+				want := strings.ReplaceAll(c.wantArgs, "DIR", dir)
+				if got := strings.Join(strings.Split(strings.TrimSpace(string(args)), "\n"), " "); got != want {
+					t.Errorf("bastionhub args = %q, want %q", got, want)
+				}
+				if !strings.Contains(body, "bastionhub &lt;output&gt;") {
+					t.Errorf("want the escaped bastionhub output:\n%s", body)
+				}
+			}
+			if c.wantCode != 200 {
+				return
+			}
+			if !strings.HasPrefix(strings.TrimSpace(body), `<div id="endpoints-view">`) || strings.Contains(body, "<hgroup>") || strings.Contains(body, "<script>") {
+				t.Errorf("want only the #endpoints-view element, which the forms swap with outerHTML:\n%s", body)
+			}
+			if got := strings.Contains(body, `<article class="error">`); got != c.wantFailed {
+				t.Errorf("failed result = %v, want %v:\n%s", got, c.wantFailed, body)
+			}
+			changed := c.wantArgs != "" && !c.wantFailed
+			if strings.Contains(body, `id="endpoint-row-new-ep"`) != changed || strings.Contains(body, `id="endpoint-row-old-ep"`) == changed {
+				t.Errorf("want the view re-read from BASTIONHUB_CONFIG (changed = %v):\n%s", changed, body)
+			}
+			if c.action == "enroll" && c.wantFailed && !strings.Contains(body, fmt.Sprintf(`name="name" required value="%s"`, c.form.Get("name"))) {
+				t.Errorf("a failed enroll should keep the submitted values:\n%s", body)
+			}
+		})
+	}
+}
+
+func TestEndpointsRenderUnregisterPerRow(t *testing.T) {
+	dir := t.TempDir()
+	config := filepath.Join(dir, "endpoints.yaml")
+	if err := os.WriteFile(config, []byte("endpoints:\n  a: {port: 12001, user: root}\n  b: {port: 12002, user: root}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tmpl := template.Must(template.ParseFS(templatesFS, "templates/*.html.tmpl"))
+	a := &app{detected: detected{Bastionhub: "/bin/false"}, tmpl: tmpl, token: "tok", bastionhubConfig: config}
+	rec := httptest.NewRecorder()
+	a.endpoints(rec, httptest.NewRequest("GET", "/t/tok/endpoints", nil))
+	body := rec.Body.String()
+	for _, name := range []string{"a", "b"} {
+		row := body[strings.Index(body, `id="endpoint-row-`+name+`"`):]
+		row = row[:strings.Index(row, "</tr>")]
+		if !strings.Contains(row, "/api/endpoint/unregister") || !strings.Contains(row, `name="name" value="`+name+`"`) || !strings.Contains(row, "hx-confirm=") {
+			t.Errorf("row %s has no confirmed Unregister action:\n%s", name, row)
+		}
+	}
+	if !strings.Contains(body, `hx-post="/t/tok/api/endpoint/enroll"`) {
+		t.Errorf("the view has no enroll form:\n%s", body)
+	}
+}
+
 // TestIssuanceLog covers GET /log: entries in ts order regardless of file
 // order, and the principal, CA and inclusive UTC date-range filters.
 func TestIssuanceLog(t *testing.T) {

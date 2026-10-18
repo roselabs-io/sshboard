@@ -15,7 +15,8 @@ binary.
 - **Endpoints** — bastionhub's registry with live tunnel state and uptime.
 
 Actions run the CLIs: `sshca cert revoke`, `sshca cert renew`, `sshca cert
-inspect`, `bastionhub status`, `bastionhub ssh`.
+inspect`, `bastionhub status`, `bastionhub ssh`, `bastionhub endpoint enroll`,
+`bastionhub endpoint unregister`.
 
 It holds no CA keys, opens no SSH connections of its own, and ships no
 authentication. It reads two files and executes two binaries.
@@ -115,7 +116,7 @@ sshboard --bind 127.0.0.1:7890   # still localhost-bound; proxy in front
 - Reads sshca's JSONL audit log (`<ca-dir>/issuance-log.jsonl`) directly. Schema is sshca's contract surface.
 - Reads bastionhub's `endpoints.yaml` (`~/.config/bastionhub/endpoints.yaml` or `$BASTIONHUB_CONFIG`) directly. Schema is bastionhub's contract surface.
 - Shells out to `sshca cert revoke / renew / inspect` for cert-side actions.
-- Shells out to `bastionhub status / ssh` for endpoint-side actions.
+- Shells out to `bastionhub status / ssh / endpoint enroll / endpoint unregister` for endpoint-side actions.
 
 Auto-discovery, in order:
 
@@ -204,6 +205,42 @@ sshca cert inspect <cert>
   and sshca's output, for example when the cert file is not on the sshboard
   host.
 - The dialog is read-only.
+
+### Enrolling an endpoint
+
+The Endpoints view has an "Enroll an endpoint" form. It runs:
+
+```sh
+BASTIONHUB_CONFIG=<config> bastionhub endpoint enroll --ca-dir=<ca-dir> [--<flag>=<value> ...] <name>
+```
+
+- `<config>` is the endpoints.yaml the view reads (`--config`,
+  `$BASTIONHUB_CONFIG`, or the default path), and `<ca-dir>` is sshboard's CA
+  dir, so the new endpoint and its tunnel certificate appear in the Endpoints
+  and Certs views.
+- The fields are the command's inputs: name and pubkey file (required), user,
+  port, identity, validity, principal, description. An empty field omits its
+  flag and takes bastionhub's default (user `root`, the next free port in
+  12001-12099, validity `+52w`, principal `gw-tunnel`).
+- The pubkey file is a path on the sshboard host; a relative path resolves
+  against sshboard's working directory.
+- A name starting with `-` is rejected without running bastionhub.
+- The result, including bastionhub's next steps for shipping the certificate
+  to the endpoint, is shown above the re-read table. On failure the form keeps
+  the submitted values.
+- Enrollment through `bastionhub invite` is not available here.
+
+### Unregistering an endpoint
+
+Each endpoint row has an Unregister action. After a confirmation it runs:
+
+```sh
+BASTIONHUB_CONFIG=<config> bastionhub endpoint unregister <name>
+```
+
+This removes the endpoint from endpoints.yaml. It does not revoke the
+endpoint's tunnel certificate; that certificate stays valid until it expires or
+is revoked from the Certs view.
 
 ## Stability promises
 
