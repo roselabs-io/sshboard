@@ -12,6 +12,20 @@ binary.
   by principal or by certificates expiring within a given window.
 - **Endpoints** — bastionhub's registry with live tunnel state and uptime.
 
+### CI deploy certificates
+
+Certificates with a `deploy-*` principal are listed in their own table, "CI
+deploy", above the others. The repository column is the key ID without its
+`@github-actions` suffix (`<repo>@github-actions`).
+
+A deploy certificate is marked EXPIRING when it expires within
+`--deploy-expiring-within` (default `14d`; units `s`, `m`, `h`, `d`, `w`). Other
+certificates are marked EXPIRING within 24 hours.
+
+A certificate shows REVOKED only on its row right after it is revoked from
+sshboard; a reload shows its expiry status again. sshca records revocations in
+the binary KRL only, and sshboard does not read it.
+
 Actions run the CLIs: `sshca cert revoke`, `sshca cert renew`, `sshca cert
 inspect`, `bastionhub status`, `bastionhub ssh`.
 

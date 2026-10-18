@@ -1,5 +1,6 @@
 {{define "cert-row"}}<tr id="cert-row-{{.KeyID}}">
     <td><span class="badge {{.StatusClass}}">{{.Status}}</span></td>
+    {{if .IsDeploy}}<td><code>{{.Repo}}</code></td>{{end}}
     <td><code>{{.KeyID}}</code></td>
     <td>
         {{range $i, $p := .PrincipalsList}}{{if $i}}, {{end}}<code>{{$p}}</code>{{end}}

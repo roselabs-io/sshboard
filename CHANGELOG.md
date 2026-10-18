@@ -4,6 +4,13 @@ All notable changes to `sshboard` will be documented in this file.
 
 Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning is [SemVer](https://semver.org/) once we reach v1.0; until then, breaking changes can land in minor releases — see "Stability promises" in [README.md](README.md).
 
+## [Unreleased]
+
+### Added
+
+- The Certs view lists certificates with a `deploy-*` principal in a "CI deploy" table, with the repository taken from the key ID (`<repo>@github-actions`).
+- `--deploy-expiring-within` (default `14d`): deploy certificates that expire within this duration are marked EXPIRING. Other certificates keep the 24h window.
+
 ## [0.1.0] — 2026-05-29
 
 Initial release. Both views render live data. Certificate revocation is delegated to sshca; endpoint SSH commands are copied to the clipboard.
