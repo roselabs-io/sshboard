@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"html/template"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -199,8 +200,8 @@ func TestCertsRenderRenewOnlyWithPubkeyFile(t *testing.T) {
 	body := rec.Body.String()
 	alice := body[strings.Index(body, `id="cert-row-alice-old"`):strings.Index(body, `id="cert-row-bob-old"`)]
 	bob := body[strings.Index(body, `id="cert-row-bob-old"`):]
-	if !strings.Contains(alice, "/api/cert/inspect") || !strings.Contains(bob, "/api/cert/inspect") {
-		t.Errorf("every row should carry an Inspect action:\n%s", body)
+	if !strings.Contains(alice, `name="cert" value="x"`) || !strings.Contains(bob, `name="cert" value="y"`) {
+		t.Errorf("every row's Inspect action should submit its entry's cert:\n%s", body)
 	}
 	if !strings.Contains(alice, "/api/cert/renew") {
 		t.Errorf("alice row has no Renew action:\n%s", alice)
@@ -255,26 +256,33 @@ func TestRenewCert(t *testing.T) {
 }
 
 // TestInspectCert covers the dialog fragment of GET /api/cert/inspect: sshca
-// runs on the cert path the issuance log records, its output fills the dialog,
-// and a failing sshca still returns the dialog, marked as failed.
+// runs on the cert path of the issuance-log entry the request selects, also
+// when two entries share key_id and ca, its output fills the dialog, and a
+// failing sshca still returns the dialog, marked as failed.
 func TestInspectCert(t *testing.T) {
 	cases := []struct {
 		name       string
 		keyID      string
+		cert       string // file name in the CA dir
 		exit       int
 		wantCode   int
 		wantFailed bool
 	}{
-		{"ok", "alice", 0, 200, false},
-		{"sshca fails", "alice", 1, 200, true},
-		{"unknown key_id", "nobody", 0, 404, false},
+		{"first of two entries", "alice", "alice-1-cert.pub", 0, 200, false},
+		{"second of two entries", "alice", "alice-2-cert.pub", 0, 200, false},
+		{"sshca fails", "alice", "alice-1-cert.pub", 1, 200, true},
+		{"unknown key_id", "nobody", "alice-1-cert.pub", 0, 404, false},
+		{"cert not in log", "alice", "other-cert.pub", 0, 404, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			dir := t.TempDir()
-			cert := filepath.Join(dir, "alice-cert.pub")
-			entry := fmt.Sprintf(`{"ts":"2026-05-29T15:00:00Z","ca":"user","key_id":"alice","principals":"alice","valid":"+8h","pubkey":"alice.pub","cert":%q}`+"\n", cert)
-			if err := os.WriteFile(filepath.Join(dir, "issuance-log.jsonl"), []byte(entry), 0o600); err != nil {
+			cert := filepath.Join(dir, c.cert)
+			var log string
+			for _, name := range []string{"alice-1-cert.pub", "alice-2-cert.pub"} {
+				log += fmt.Sprintf(`{"ts":"2026-05-29T15:00:00Z","ca":"user","key_id":"alice","principals":"alice","valid":"+8h","pubkey":"alice.pub","cert":%q}`+"\n", filepath.Join(dir, name))
+			}
+			if err := os.WriteFile(filepath.Join(dir, "issuance-log.jsonl"), []byte(log), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			sshca := filepath.Join(dir, "sshca")
@@ -286,7 +294,8 @@ func TestInspectCert(t *testing.T) {
 			a := &app{detected: detected{Sshca: sshca}, tmpl: tmpl, token: "tok", caDir: dir}
 
 			rec := httptest.NewRecorder()
-			a.inspectCert(rec, httptest.NewRequest("GET", "/t/tok/api/cert/inspect?key_id="+c.keyID+"&ca=user", nil))
+			q := url.Values{"key_id": {c.keyID}, "ca": {"user"}, "cert": {cert}}
+			a.inspectCert(rec, httptest.NewRequest("GET", "/t/tok/api/cert/inspect?"+q.Encode(), nil))
 			if rec.Code != c.wantCode {
 				t.Fatalf("status = %d, want %d: %s", rec.Code, c.wantCode, rec.Body)
 			}

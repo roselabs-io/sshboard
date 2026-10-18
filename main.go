@@ -610,8 +610,9 @@ func (a *app) renewCert(w http.ResponseWriter, r *http.Request) {
 }
 
 // inspectCert handles GET /t/<token>/api/cert/inspect
-// Query: key_id, ca. The cert file is the one the issuance log records for the
-// entry, never a path from the request.
+// Query: key_id, ca, cert. The entry is the issuance-log entry matching all
+// three, so rows sharing key_id and ca stay distinct; the path passed to sshca
+// is the one the log records, and a cert value not in the log is a 404.
 // Returns: HTML fragment of a dialog holding the output of `sshca cert inspect`,
 // with status 200 also when sshca fails, so that HTMX swaps the dialog in.
 func (a *app) inspectCert(w http.ResponseWriter, r *http.Request) {
@@ -621,8 +622,9 @@ func (a *app) inspectCert(w http.ResponseWriter, r *http.Request) {
 	}
 	keyID := r.FormValue("key_id")
 	ca := r.FormValue("ca")
-	if keyID == "" || (ca != "user" && ca != "host") {
-		http.Error(w, "missing or invalid key_id / ca", http.StatusBadRequest)
+	cert := r.FormValue("cert")
+	if keyID == "" || cert == "" || (ca != "user" && ca != "host") {
+		http.Error(w, "missing or invalid key_id / ca / cert", http.StatusBadRequest)
 		return
 	}
 
@@ -633,12 +635,12 @@ func (a *app) inspectCert(w http.ResponseWriter, r *http.Request) {
 	}
 	var entry *logEntry
 	for i := range entries {
-		if entries[i].KeyID == keyID && entries[i].CA == ca {
+		if entries[i].KeyID == keyID && entries[i].CA == ca && entries[i].Cert == cert {
 			entry = &entries[i]
 		}
 	}
 	if entry == nil {
-		http.Error(w, "no issuance log entry for key_id", http.StatusNotFound)
+		http.Error(w, "no issuance log entry for key_id and cert", http.StatusNotFound)
 		return
 	}
 
