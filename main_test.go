@@ -199,6 +199,9 @@ func TestCertsRenderRenewOnlyWithPubkeyFile(t *testing.T) {
 	body := rec.Body.String()
 	alice := body[strings.Index(body, `id="cert-row-alice-old"`):strings.Index(body, `id="cert-row-bob-old"`)]
 	bob := body[strings.Index(body, `id="cert-row-bob-old"`):]
+	if !strings.Contains(alice, "/api/cert/inspect") || !strings.Contains(bob, "/api/cert/inspect") {
+		t.Errorf("every row should carry an Inspect action:\n%s", body)
+	}
 	if !strings.Contains(alice, "/api/cert/renew") {
 		t.Errorf("alice row has no Renew action:\n%s", alice)
 	}
@@ -246,6 +249,63 @@ func TestRenewCert(t *testing.T) {
 			newRow, oldRow := strings.Index(body, `id="cert-row-alice-new"`), strings.Index(body, `id="cert-row-alice-old"`)
 			if newRow < 0 || oldRow < newRow {
 				t.Errorf("want the new row, then the renewed row:\n%s", body)
+			}
+		})
+	}
+}
+
+// TestInspectCert covers the dialog fragment of GET /api/cert/inspect: sshca
+// runs on the cert path the issuance log records, its output fills the dialog,
+// and a failing sshca still returns the dialog, marked as failed.
+func TestInspectCert(t *testing.T) {
+	cases := []struct {
+		name       string
+		keyID      string
+		exit       int
+		wantCode   int
+		wantFailed bool
+	}{
+		{"ok", "alice", 0, 200, false},
+		{"sshca fails", "alice", 1, 200, true},
+		{"unknown key_id", "nobody", 0, 404, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			cert := filepath.Join(dir, "alice-cert.pub")
+			entry := fmt.Sprintf(`{"ts":"2026-05-29T15:00:00Z","ca":"user","key_id":"alice","principals":"alice","valid":"+8h","pubkey":"alice.pub","cert":%q}`+"\n", cert)
+			if err := os.WriteFile(filepath.Join(dir, "issuance-log.jsonl"), []byte(entry), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			sshca := filepath.Join(dir, "sshca")
+			script := fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' \"$@\" > %q\necho '<Type: ssh-ed25519-cert-v01@openssh.com user certificate>'\nexit %d\n", filepath.Join(dir, "args"), c.exit)
+			if err := os.WriteFile(sshca, []byte(script), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			tmpl := template.Must(template.ParseFS(templatesFS, "templates/*.html.tmpl"))
+			a := &app{detected: detected{Sshca: sshca}, tmpl: tmpl, token: "tok", caDir: dir}
+
+			rec := httptest.NewRecorder()
+			a.inspectCert(rec, httptest.NewRequest("GET", "/t/tok/api/cert/inspect?key_id="+c.keyID+"&ca=user", nil))
+			if rec.Code != c.wantCode {
+				t.Fatalf("status = %d, want %d: %s", rec.Code, c.wantCode, rec.Body)
+			}
+			args, err := os.ReadFile(filepath.Join(dir, "args"))
+			if c.wantCode != 200 {
+				if err == nil {
+					t.Fatalf("sshca ran with %q", args)
+				}
+				return
+			}
+			if got, want := strings.Join(strings.Fields(string(args)), " "), "cert inspect "+cert; got != want {
+				t.Errorf("sshca args = %q, want %q", got, want)
+			}
+			body := rec.Body.String()
+			if !strings.Contains(body, "<dialog open>") || !strings.Contains(body, "&lt;Type: ssh-ed25519-cert-v01@openssh.com user certificate&gt;") {
+				t.Errorf("want a dialog holding the escaped sshca output:\n%s", body)
+			}
+			if got := strings.Contains(body, "Inspect failed"); got != c.wantFailed {
+				t.Errorf("failed marker = %v, want %v:\n%s", got, c.wantFailed, body)
 			}
 		})
 	}

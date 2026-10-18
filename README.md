@@ -144,6 +144,22 @@ sshca cert renew --ca <ca> --pubkey-file <pubkey> --dir <ca-dir> [--ship <target
   the certificate was signed on another machine or from another working
   directory.
 
+### Inspecting a certificate
+
+Each certificate row has an Inspect action. It runs:
+
+```sh
+sshca cert inspect <cert>
+```
+
+- `<cert>` is the `cert` field of the row's issuance-log entry. A relative path
+  resolves against sshboard's working directory.
+- The output (`ssh-keygen -L`) is shown in a dialog over the Certs view; Close
+  dismisses it. When sshca exits non-zero, the dialog shows "Inspect failed"
+  and sshca's output, for example when the cert file is not on the sshboard
+  host.
+- The dialog is read-only.
+
 ## Stability promises
 
 Pre-1.0: minor releases may break things. Breaking changes will be called out in [CHANGELOG.md](CHANGELOG.md) with the rationale.

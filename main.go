@@ -609,6 +609,52 @@ func (a *app) renewCert(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// inspectCert handles GET /t/<token>/api/cert/inspect
+// Query: key_id, ca. The cert file is the one the issuance log records for the
+// entry, never a path from the request.
+// Returns: HTML fragment of a dialog holding the output of `sshca cert inspect`,
+// with status 200 also when sshca fails, so that HTMX swaps the dialog in.
+func (a *app) inspectCert(w http.ResponseWriter, r *http.Request) {
+	if a.detected.Sshca == "" {
+		http.Error(w, "sshca not detected", http.StatusServiceUnavailable)
+		return
+	}
+	keyID := r.FormValue("key_id")
+	ca := r.FormValue("ca")
+	if keyID == "" || (ca != "user" && ca != "host") {
+		http.Error(w, "missing or invalid key_id / ca", http.StatusBadRequest)
+		return
+	}
+
+	entries, err := readLog(a.caDir)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	var entry *logEntry
+	for i := range entries {
+		if entries[i].KeyID == keyID && entries[i].CA == ca {
+			entry = &entries[i]
+		}
+	}
+	if entry == nil {
+		http.Error(w, "no issuance log entry for key_id", http.StatusNotFound)
+		return
+	}
+
+	out, err := exec.Command(a.detected.Sshca, "cert", "inspect", entry.Cert).CombinedOutput()
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	data := map[string]any{
+		"KeyID":  keyID,
+		"Cert":   entry.Cert,
+		"Output": string(out),
+		"Failed": err != nil,
+	}
+	if err := a.tmpl.ExecuteTemplate(w, "cert-inspect", data); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
 // -----------------------------------------------------------------------------
 // CA dir discovery
 // -----------------------------------------------------------------------------
@@ -704,6 +750,7 @@ func main() {
 	mux.HandleFunc(prefix+"/endpoints", a.endpoints)
 	mux.HandleFunc(prefix+"/api/cert/revoke", a.revokeCert)
 	mux.HandleFunc(prefix+"/api/cert/renew", a.renewCert)
+	mux.HandleFunc(prefix+"/api/cert/inspect", a.inspectCert)
 
 	staticSub, err := fs.Sub(staticFS, "static")
 	if err != nil {
