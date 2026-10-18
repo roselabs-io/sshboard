@@ -495,8 +495,8 @@ func (a *app) runBastionhub(args ...string) ([]byte, error) {
 	return cmd.CombinedOutput()
 }
 
-// renderEndpointsResult writes the Endpoints view's content fragment, re-read
-// after the action, with the action's result above the table and the enroll
+// renderEndpointsResult writes the #endpoints-view element, the target the
+// action forms swap with outerHTML, re-read after the action, with the action's result above the table and the enroll
 // form prefilled with form. Status is 200 also on failure, so that HTMX swaps.
 func (a *app) renderEndpointsResult(w http.ResponseWriter, res endpointResult, form url.Values) {
 	extra := a.endpointsExtra()
@@ -505,7 +505,7 @@ func (a *app) renderEndpointsResult(w http.ResponseWriter, res endpointResult, f
 		extra["EnrollForm"] = form
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := a.tmpl.ExecuteTemplate(w, "endpoints-content", a.viewData("endpoints", extra)); err != nil {
+	if err := a.tmpl.ExecuteTemplate(w, "endpoints-view", a.viewData("endpoints", extra)); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }

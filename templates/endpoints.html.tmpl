@@ -4,6 +4,27 @@
     <p>Reading <code>{{.BastionhubConfig}}</code> + live tunnel state via <code>bastionhub status</code>.</p>
 </hgroup>
 
+{{template "endpoints-view" .}}
+
+<script>
+    function copyAndConfirm(btn) {
+        const text = btn.getAttribute('data-copy');
+        navigator.clipboard.writeText(text).then(() => {
+            const orig = btn.textContent;
+            btn.textContent = '✓ Copied';
+            btn.disabled = true;
+            setTimeout(() => {
+                btn.textContent = orig;
+                btn.disabled = false;
+            }, 1200);
+        }).catch((err) => {
+            alert('Copy failed: ' + err);
+        });
+    }
+</script>
+{{end}}
+
+{{define "endpoints-view"}}
 <div id="endpoints-view">
 {{with .Result}}
 <article{{if .Failed}} class="error"{{end}}>
@@ -109,21 +130,4 @@
 </details>
 {{end}}
 </div>
-
-<script>
-    function copyAndConfirm(btn) {
-        const text = btn.getAttribute('data-copy');
-        navigator.clipboard.writeText(text).then(() => {
-            const orig = btn.textContent;
-            btn.textContent = '✓ Copied';
-            btn.disabled = true;
-            setTimeout(() => {
-                btn.textContent = orig;
-                btn.disabled = false;
-            }, 1200);
-        }).catch((err) => {
-            alert('Copy failed: ' + err);
-        });
-    }
-</script>
 {{end}}

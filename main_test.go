@@ -323,7 +323,7 @@ func TestInspectCert(t *testing.T) {
 // TestEndpointActions covers POST /api/endpoint/enroll and /unregister through
 // a fake bastionhub that records its arguments and, on success, rewrites the
 // file named by BASTIONHUB_CONFIG to hold one endpoint "new-ep". The response
-// is the Endpoints view re-read from that file, with bastionhub's output.
+// is the #endpoints-view element re-read from that file, with bastionhub's output.
 func TestEndpointActions(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -394,6 +394,9 @@ printf 'endpoints:\n  new-ep: {port: 12002, user: root}\n' > "$BASTIONHUB_CONFIG
 			}
 			if c.wantCode != 200 {
 				return
+			}
+			if !strings.HasPrefix(strings.TrimSpace(body), `<div id="endpoints-view">`) || strings.Contains(body, "<hgroup>") || strings.Contains(body, "<script>") {
+				t.Errorf("want only the #endpoints-view element, which the forms swap with outerHTML:\n%s", body)
 			}
 			if got := strings.Contains(body, `<article class="error">`); got != c.wantFailed {
 				t.Errorf("failed result = %v, want %v:\n%s", got, c.wantFailed, body)
