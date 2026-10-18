@@ -22,6 +22,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -435,8 +436,35 @@ func (a *app) index(w http.ResponseWriter, _ *http.Request) {
 	a.render(w, "index", nil)
 }
 
-func (a *app) certs(w http.ResponseWriter, _ *http.Request) {
-	extra := map[string]any{}
+// certFilterStatuses are the values of the Certs view's status filter.
+var certFilterStatuses = []string{"ALL", "ACTIVE", "EXPIRING", "EXPIRED"}
+
+// filterCerts keeps the views whose key_id contains q, ignoring case, and
+// whose status is status; "ALL" keeps every status, including NEVER.
+func filterCerts(views []CertView, q, status string) []CertView {
+	q = strings.ToLower(q)
+	var kept []CertView
+	for _, v := range views {
+		if (status == "ALL" || v.Status == status) && strings.Contains(strings.ToLower(v.KeyID), q) {
+			kept = append(kept, v)
+		}
+	}
+	return kept
+}
+
+// certs handles GET /t/<token>/certs?q=<key_id substring>&status=<status>.
+// An empty or absent status is ALL.
+func (a *app) certs(w http.ResponseWriter, r *http.Request) {
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	status := r.URL.Query().Get("status")
+	if status == "" {
+		status = "ALL"
+	}
+	if !slices.Contains(certFilterStatuses, status) {
+		http.Error(w, "invalid status", http.StatusBadRequest)
+		return
+	}
+	extra := map[string]any{"Query": q, "StatusFilter": status, "FilterStatuses": certFilterStatuses}
 	if a.detected.Sshca == "" {
 		extra["Error"] = "sshca not detected on PATH."
 		a.render(w, "certs", extra)
@@ -451,7 +479,8 @@ func (a *app) certs(w http.ResponseWriter, _ *http.Request) {
 	for i := range views {
 		views[i].Token = a.token
 	}
-	extra["Certs"] = views
+	extra["Total"] = len(views)
+	extra["Certs"] = filterCerts(views, q, status)
 	a.render(w, "certs", extra)
 }
 

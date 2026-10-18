@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -250,6 +251,64 @@ func TestRenewCert(t *testing.T) {
 			newRow, oldRow := strings.Index(body, `id="cert-row-alice-new"`), strings.Index(body, `id="cert-row-alice-old"`)
 			if newRow < 0 || oldRow < newRow {
 				t.Errorf("want the new row, then the renewed row:\n%s", body)
+			}
+		})
+	}
+}
+
+// TestCertsFilter covers the key_id and status filters of GET /certs over a log
+// holding one cert per status.
+func TestCertsFilter(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now().UTC()
+	entry := func(keyID string, issued time.Duration, valid string) string {
+		return fmt.Sprintf(`{"ts":%q,"ca":"user","key_id":%q,"principals":"p","valid":%q,"pubkey":"x.pub","cert":"x"}`+"\n",
+			now.Add(issued).Format(time.RFC3339), keyID, valid)
+	}
+	log := entry("alice-active", -time.Hour, "+52w") +
+		entry("Alice-expiring", -time.Hour, "+8h") +
+		entry("bob-expired", -48*time.Hour, "+8h") +
+		entry("bob-never", -time.Hour, "always")
+	if err := os.WriteFile(filepath.Join(dir, "issuance-log.jsonl"), []byte(log), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tmpl := template.Must(template.ParseFS(templatesFS, "templates/*.html.tmpl"))
+	a := &app{detected: detected{Sshca: "sshca"}, tmpl: tmpl, token: "tok", caDir: dir}
+
+	all := []string{"alice-active", "Alice-expiring", "bob-expired", "bob-never"}
+	cases := []struct {
+		query    string
+		wantCode int
+		want     []string
+	}{
+		{"", 200, all},
+		{"?status=ALL", 200, all},
+		{"?status=ACTIVE", 200, []string{"alice-active"}},
+		{"?status=EXPIRING", 200, []string{"Alice-expiring"}},
+		{"?status=EXPIRED", 200, []string{"bob-expired"}},
+		{"?q=alice", 200, []string{"alice-active", "Alice-expiring"}},
+		{"?q=BOB&status=EXPIRED", 200, []string{"bob-expired"}},
+		{"?q=bob&status=ACTIVE", 200, nil},
+		{"?status=NEVER", 400, nil},
+	}
+	for _, c := range cases {
+		t.Run(c.query, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			a.certs(rec, httptest.NewRequest("GET", "/t/tok/certs"+c.query, nil))
+			if rec.Code != c.wantCode {
+				t.Fatalf("status = %d, want %d", rec.Code, c.wantCode)
+			}
+			if c.wantCode != 200 {
+				return
+			}
+			body := rec.Body.String()
+			for _, k := range all {
+				if got, want := strings.Contains(body, `id="cert-row-`+k+`"`), slices.Contains(c.want, k); got != want {
+					t.Errorf("row %s shown = %v, want %v", k, got, want)
+				}
+			}
+			if wantCount := fmt.Sprintf("%d of 4 cert(s)", len(c.want)); !strings.Contains(body, wantCount) {
+				t.Errorf("body lacks %q", wantCount)
 			}
 		})
 	}
