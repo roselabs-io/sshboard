@@ -8,6 +8,7 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added — Certs view
 
+- **Filtering.** A search field filters rows by `key_id` substring (ignoring case) and status buttons by ACTIVE, EXPIRING, EXPIRED or ALL. Both are query parameters of `/t/<token>/certs`: `q` and `status` (default `ALL`; another value returns 400). See README, "Filtering certificates".
 - **Click-to-renew.** Each row with an expiry carries a Renew action that POSTs to `/t/<token>/api/cert/renew`; the server runs `sshca cert renew --ca <ca> --pubkey-file <pubkey> --dir <ca-dir>`, with `--ship <target>` when the confirmation prompt is answered with a target. The pubkey file is the entry's `pubkey` field in the issuance log. Rows whose pubkey file is not on the host show no Renew action. See README, "Renewing a certificate".
 
 ## [0.1.0] — 2026-05-29

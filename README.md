@@ -8,8 +8,8 @@ binary.
 
 `sshboard` renders two views and proxies actions to the two CLIs:
 
-- **Certificates** — sshca's issuance log as a table, with expiry state, filtered
-  by principal or by certificates expiring within a given window.
+- **Certificates** — sshca's issuance log as a table, with expiry state,
+  filtered by `key_id` substring and by status.
 - **Endpoints** — bastionhub's registry with live tunnel state and uptime.
 
 Actions run the CLIs: `sshca cert revoke`, `sshca cert renew`, `sshca cert
@@ -121,6 +121,25 @@ Auto-discovery, in order:
 2. `$BASTIONHUB_CONFIG` env var
 3. `--ca-dir` and `--config` flags, which override the environment
 4. The default paths above
+
+### Filtering certificates
+
+The Certs view has a search field and four status buttons above the table. Both
+filters are query parameters of `/t/<token>/certs`:
+
+| Parameter | Values | Default |
+|---|---|---|
+| `q` | substring of `key_id`, matched ignoring case | empty: every `key_id` |
+| `status` | `ALL`, `ACTIVE`, `EXPIRING`, `EXPIRED` | `ALL` |
+
+- `ALL` includes certificates without expiry (`NEVER`); no other button shows
+  them.
+- Any other `status` value returns `400 Bad Request`.
+- The search field applies on Enter and keeps the selected status; a status
+  button keeps the search text.
+- The filter is not stored; it lives only in the URL. A row swapped in by
+  Revoke or Renew stays on the page until it is reloaded, whether or not it
+  matches the filter.
 
 ### Renewing a certificate
 
