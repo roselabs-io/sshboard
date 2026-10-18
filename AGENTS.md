@@ -19,14 +19,16 @@ Templates and static assets are embedded with `go:embed`; there is no JavaScript
 | `static/` | `app.css` and the vendored `htmx.min.js` and `pico.min.css`, embedded |
 | `README.md`, `CHANGELOG.md`, `CLAUDE.md` | usage, release notes, contributor notes |
 | `.github/workflows/ci.yml` | `go vet` and `go build` for six targets, `go test` on linux/amd64 |
-| `.github/workflows/release.yml` | on a `v*` tag: builds six targets, archives, `checksums.txt`, a GitHub Release |
+| `.github/workflows/release.yml` | on a `v*` tag: builds six targets, archives, `checksums.txt`, a GitHub Release, then notifies `roselabs-io/homebrew-tools` |
 | `.github/workflows/sshboard-ci.yml` | `validate` (PR metadata) and `gate` (`just gate`) |
 | `.github/workflows/sshboard-pm.yml` | the issue and board sync of Governor |
 | `pipeline.yaml` | the Governor dispatcher's config for this repository |
 | `tools/local_preflight.py` | the local check the dispatcher runs: `just check`, then `just gate` |
 
 No key or token is tracked. A merge into `main` deploys nothing; a `v*` tag creates a GitHub
-Release. The Homebrew formula in `roselabs-io/homebrew-tools` is updated by hand (sshboard#4). The
+Release; for a tag without `-`, the `homebrew` job of `release.yml` then sends a `release`
+`repository_dispatch` event (`tool`, `tag`) to `roselabs-io/homebrew-tools`, authenticated with the
+secret `HOMEBREW_TAP_TOKEN`, for a workflow there to update `Formula/sshboard.rb`. The
 binary also runs as `sshboard.service` on the box; how it is installed and updated there is not
 recorded in this repository.
 
