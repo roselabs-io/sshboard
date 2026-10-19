@@ -227,6 +227,11 @@ func TestCertsGroupsDeployCerts(t *testing.T) {
 		if c.repo != "" && !strings.Contains(r, "<td><code>"+c.repo+"</code></td>") {
 			t.Errorf("%s: want repository %s in row:\n%s", c.keyID, c.repo, r)
 		}
+		// A key ID such as "<repo>@github-actions" is not a valid CSS id
+		// selector, so the row actions must not target the row by its key ID.
+		if !strings.Contains(r, `hx-target="closest tr"`) || strings.Contains(r, `hx-target="#cert-row-`) {
+			t.Errorf("%s: row actions must target the row with closest tr:\n%s", c.keyID, r)
+		}
 	}
 }
 

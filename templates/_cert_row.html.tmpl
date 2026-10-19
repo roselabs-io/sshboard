@@ -20,7 +20,7 @@
         </form>
         {{if and (ne .Status "REVOKED") (ne .Status "NEVER")}}
         <form hx-post="/t/{{.Token}}/api/cert/revoke"
-              hx-target="#cert-row-{{.KeyID}}"
+              hx-target="closest tr"
               hx-swap="outerHTML"
               hx-confirm="Revoke cert {{.KeyID}} ({{.Principals}})? This cannot be undone.">
             <input type="hidden" name="key_id" value="{{.KeyID}}">
@@ -30,7 +30,7 @@
         </form>
         {{if .PubkeyAvailable}}
         <form hx-post="/t/{{.Token}}/api/cert/renew"
-              hx-target="#cert-row-{{.KeyID}}"
+              hx-target="closest tr"
               hx-swap="outerHTML"
               hx-prompt="Renew cert {{.KeyID}} ({{.Principals}})? sshca signs {{.Pubkey}} again with its default validity. Optional scp target for the new cert (empty: do not ship):">
             <input type="hidden" name="key_id" value="{{.KeyID}}">
