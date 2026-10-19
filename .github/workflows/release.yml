@@ -4,6 +4,13 @@
 # .tar.gz (Unix) or .zip (Windows), generates a sha256 checksums
 # manifest, and attaches everything to a GitHub Release with
 # auto-generated release notes.
+#
+# For a tag that is not a prerelease, the homebrew job then sends a
+# repository_dispatch event (type `release`, payload `tool`, `tag`)
+# to roselabs-io/homebrew-tools, whose workflow updates
+# Formula/sshboard.rb. GITHUB_TOKEN cannot reach another repository,
+# so the dispatch uses the secret HOMEBREW_TAP_TOKEN, a token that can
+# write to roselabs-io/homebrew-tools.
 
 name: Release
 
@@ -92,3 +99,19 @@ jobs:
           fail_on_unmatched_files: true
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
+
+  homebrew:
+    name: Notify the Homebrew tap
+    needs: release
+    # A prerelease tag (one containing '-') does not update the formula.
+    if: ${{ !contains(github.ref_name, '-') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send repository_dispatch to roselabs-io/homebrew-tools
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          gh api repos/roselabs-io/homebrew-tools/dispatches \
+            -f event_type=release \
+            -f 'client_payload[tool]=sshboard' \
+            -f "client_payload[tag]=${GITHUB_REF_NAME}"
