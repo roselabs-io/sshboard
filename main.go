@@ -95,6 +95,22 @@ type CertView struct {
 	Token           string // URL token for hx-post action endpoints
 }
 
+// IsDeploy reports whether the cert carries a CI deploy principal (deploy-*).
+func (v CertView) IsDeploy() bool {
+	for _, p := range v.PrincipalsList {
+		if strings.HasPrefix(p, "deploy-") {
+			return true
+		}
+	}
+	return false
+}
+
+// Repo is the repository a deploy cert belongs to: the key ID with its
+// "@github-actions" suffix removed. A key ID without the suffix is returned as is.
+func (v CertView) Repo() string {
+	return strings.TrimSuffix(v.KeyID, "@github-actions")
+}
+
 // parseSSHKeygenDuration parses ssh-keygen -V style durations. Mirrors the same
 // helper in sshca (sshca extends time.ParseDuration with d and w units).
 func parseSSHKeygenDuration(s string) (time.Duration, error) {
@@ -189,10 +205,12 @@ func readLog(caDir string) ([]logEntry, error) {
 	return entries, nil
 }
 
-// newCertView computes the display fields of one log entry at time now.
+// newCertView computes the display fields of one log entry at time now. The
+// cert is EXPIRING when it expires within deployWindow (deploy certs) or
+// expiringWindow (the others).
 // PubkeyAvailable is true when the entry's pubkey path names a regular file on
 // this host; a relative path resolves against sshboard's working directory.
-func newCertView(entry logEntry, now time.Time, expiringWindow time.Duration) CertView {
+func newCertView(entry logEntry, now time.Time, expiringWindow, deployWindow time.Duration) CertView {
 	v := CertView{logEntry: entry}
 	v.PrincipalsList = strings.Split(entry.Principals, ",")
 	if fi, err := os.Stat(entry.Pubkey); err == nil && fi.Mode().IsRegular() {
@@ -201,6 +219,10 @@ func newCertView(entry logEntry, now time.Time, expiringWindow time.Duration) Ce
 	exp, has, _ := parseExpiry(entry.Valid, entry.TS)
 	v.ExpiresAt = exp
 	v.HasExpiry = has
+	window := expiringWindow
+	if v.IsDeploy() {
+		window = deployWindow
+	}
 	switch {
 	case !has:
 		v.Status = "NEVER"
@@ -210,7 +232,7 @@ func newCertView(entry logEntry, now time.Time, expiringWindow time.Duration) Ce
 		v.Status = "EXPIRED"
 		v.StatusClass = "status-expired"
 		v.TimeLeft = formatTimeLeft(exp.Sub(now))
-	case exp.Before(now.Add(expiringWindow)):
+	case exp.Before(now.Add(window)):
 		v.Status = "EXPIRING"
 		v.StatusClass = "status-expiring"
 		v.TimeLeft = formatTimeLeft(exp.Sub(now))
@@ -225,7 +247,7 @@ func newCertView(entry logEntry, now time.Time, expiringWindow time.Duration) Ce
 // readCerts reads the audit log, computes expiry for each entry, and returns
 // the enriched list. Sorted by expiry ascending (most-urgent first);
 // never-expiring entries go last.
-func readCerts(caDir string, expiringWindow time.Duration) ([]CertView, error) {
+func readCerts(caDir string, expiringWindow, deployWindow time.Duration) ([]CertView, error) {
 	entries, err := readLog(caDir)
 	if err != nil {
 		return nil, err
@@ -234,7 +256,7 @@ func readCerts(caDir string, expiringWindow time.Duration) ([]CertView, error) {
 
 	var views []CertView
 	for _, entry := range entries {
-		views = append(views, newCertView(entry, now, expiringWindow))
+		views = append(views, newCertView(entry, now, expiringWindow, deployWindow))
 	}
 
 	// Sort: by ExpiresAt ascending; never-expiring entries last.
@@ -249,6 +271,18 @@ func readCerts(caDir string, expiringWindow time.Duration) ([]CertView, error) {
 	})
 
 	return views, nil
+}
+
+// groupCerts splits views into deploy certs and the others, keeping their order.
+func groupCerts(views []CertView) (deploy, other []CertView) {
+	for _, v := range views {
+		if v.IsDeploy() {
+			deploy = append(deploy, v)
+		} else {
+			other = append(other, v)
+		}
+	}
+	return deploy, other
 }
 
 // -----------------------------------------------------------------------------
@@ -423,6 +457,8 @@ type app struct {
 	caDir             string
 	bastionhubConfigs []string // one endpoints.yaml per bastion; the first is the default
 	shipTarget        string   // optional --krl-ship target; empty = local-only revoke
+	deployWindow      time.Duration
+	deployWindowFlag  string // deployWindow as given on the command line, for display
 }
 
 func (a *app) viewData(view string, extra map[string]any) map[string]any {
@@ -486,7 +522,7 @@ func (a *app) certs(w http.ResponseWriter, r *http.Request) {
 		a.render(w, "certs", extra)
 		return
 	}
-	views, err := readCerts(a.caDir, 24*time.Hour)
+	views, err := readCerts(a.caDir, 24*time.Hour, a.deployWindow)
 	if err != nil {
 		extra["Error"] = fmt.Sprintf("Reading audit log at %s/issuance-log.jsonl: %v", a.caDir, err)
 		a.render(w, "certs", extra)
@@ -496,7 +532,10 @@ func (a *app) certs(w http.ResponseWriter, r *http.Request) {
 		views[i].Token = a.token
 	}
 	extra["Total"] = len(views)
-	extra["Certs"] = filterCerts(views, q, status)
+	certs := filterCerts(views, q, status)
+	extra["Certs"] = certs
+	extra["DeployCerts"], extra["OtherCerts"] = groupCerts(certs)
+	extra["DeployWindow"] = a.deployWindowFlag
 	a.render(w, "certs", extra)
 }
 
@@ -884,11 +923,11 @@ func (a *app) renewCert(w http.ResponseWriter, r *http.Request) {
 	// sshca appends the new entry with the pubkey path it was given.
 	for i := len(after) - 1; i >= len(before); i-- {
 		if after[i].Pubkey == entry.Pubkey {
-			rows = append(rows, newCertView(after[i], now, 24*time.Hour))
+			rows = append(rows, newCertView(after[i], now, 24*time.Hour, a.deployWindow))
 			break
 		}
 	}
-	rows = append(rows, newCertView(*entry, now, 24*time.Hour))
+	rows = append(rows, newCertView(*entry, now, 24*time.Hour, a.deployWindow))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	for _, v := range rows {
 		v.Token = a.token
@@ -979,12 +1018,18 @@ func main() {
 	var configFlag configFlags
 	flag.Var(&configFlag, "config", "bastionhub endpoints.yaml path, one per bastion; repeat to switch between bastions in the Endpoints view (default: $BASTIONHUB_CONFIG, then ~/.config/bastionhub/endpoints.yaml)")
 	shipTarget := flag.String("krl-ship", "", "optional scp target for cert revoke (e.g. root@bastion:/etc/ssh/revoked_keys.krl). If unset, revoke updates local KRL only.")
+	deployWindowFlag := flag.String("deploy-expiring-within", "14d", "mark deploy-* certificates EXPIRING when they expire within this duration (ssh-keygen units: s, m, h, d, w)")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
 
 	if *showVersion {
 		fmt.Println("sshboard version", version)
 		return
+	}
+
+	deployWindow, err := parseSSHKeygenDuration(*deployWindowFlag)
+	if err != nil {
+		log.Fatal("--deploy-expiring-within: ", err)
 	}
 
 	// Parse all templates as a single template tree. Each view's content
@@ -1001,6 +1046,8 @@ func main() {
 		caDir:             resolveCaDir(*caDirFlag),
 		bastionhubConfigs: resolveBastionhubConfigs(configFlag),
 		shipTarget:        *shipTarget,
+		deployWindow:      deployWindow,
+		deployWindowFlag:  *deployWindowFlag,
 	}
 
 	// Startup banner

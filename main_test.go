@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"html/template"
+	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
@@ -162,6 +163,76 @@ func TestParseBastionhubStatus_NoHeader(t *testing.T) {
 	}
 	// silence unused import vars if test changes
 	_ = strings.Contains
+}
+
+// TestCertsGroupsDeployCerts drives the certs handler over a synthetic issuance
+// log and checks the CI deploy group, the repository column and both expiry windows.
+func TestCertsGroupsDeployCerts(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now().UTC()
+	ts := func(ago time.Duration) string { return now.Add(-ago).Format(time.RFC3339) }
+	log := strings.Join([]string{
+		// Issued 51w ago with +52w: expires in about 7 days.
+		`{"ts":"` + ts(51*7*24*time.Hour) + `","ca":"user","key_id":"roselabs-io/site@github-actions","principals":"deploy-site","valid":"+52w"}`,
+		`{"ts":"` + ts(0) + `","ca":"user","key_id":"roselabs-io/api@github-actions","principals":"deploy-api","valid":"+52w"}`,
+		// A 7-day user cert stays ACTIVE: the 14-day window applies to deploy certs only.
+		`{"ts":"` + ts(0) + `","ca":"user","key_id":"alice-laptop","principals":"gw-user","valid":"+7d"}`,
+		`{"ts":"` + ts(0) + `","ca":"user","key_id":"bob-laptop","principals":"gw-user","valid":"+8h"}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "issuance-log.jsonl"), []byte(log), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a := &app{
+		detected:         detected{Sshca: "/usr/bin/sshca"},
+		tmpl:             template.Must(template.ParseFS(templatesFS, "templates/*.html.tmpl")),
+		token:            "tok",
+		caDir:            dir,
+		deployWindow:     14 * 24 * time.Hour,
+		deployWindowFlag: "14d",
+	}
+	rec := httptest.NewRecorder()
+	a.certs(rec, httptest.NewRequest(http.MethodGet, "/t/tok/certs", nil))
+	body := rec.Body.String()
+
+	deployStart := strings.Index(body, `id="certs-deploy"`)
+	otherStart := strings.Index(body, `id="certs-other"`)
+	if deployStart < 0 || otherStart < deployStart {
+		t.Fatalf("want a CI deploy section before the other certs section:\n%s", body)
+	}
+	deploy, other := body[deployStart:otherStart], body[otherStart:]
+	if !strings.Contains(deploy, "<h2>CI deploy</h2>") {
+		t.Errorf("deploy section has no CI deploy heading")
+	}
+
+	row := func(section, keyID string) string {
+		start := strings.Index(section, `<tr id="cert-row-`+keyID+`">`)
+		if start < 0 {
+			t.Fatalf("row %s not in its section", keyID)
+		}
+		end := strings.Index(section[start:], "</tr>")
+		return section[start : start+end]
+	}
+	for _, c := range []struct {
+		section, keyID, repo, status string
+	}{
+		{deploy, "roselabs-io/site@github-actions", "roselabs-io/site", "EXPIRING"},
+		{deploy, "roselabs-io/api@github-actions", "roselabs-io/api", "ACTIVE"},
+		{other, "alice-laptop", "", "ACTIVE"},
+		{other, "bob-laptop", "", "EXPIRING"},
+	} {
+		r := row(c.section, c.keyID)
+		if !strings.Contains(r, ">"+c.status+"<") {
+			t.Errorf("%s: want status %s in row:\n%s", c.keyID, c.status, r)
+		}
+		if c.repo != "" && !strings.Contains(r, "<td><code>"+c.repo+"</code></td>") {
+			t.Errorf("%s: want repository %s in row:\n%s", c.keyID, c.repo, r)
+		}
+		// A key ID such as "<repo>@github-actions" is not a valid CSS id
+		// selector, so the row actions must not target the row by its key ID.
+		if !strings.Contains(r, `hx-target="closest tr"`) || strings.Contains(r, `hx-target="#cert-row-`) {
+			t.Errorf("%s: row actions must target the row with closest tr:\n%s", c.keyID, r)
+		}
+	}
 }
 
 // renewFixture writes a CA dir whose log holds one +8h entry for a pubkey that

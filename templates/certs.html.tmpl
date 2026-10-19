@@ -22,30 +22,59 @@
 <div role="group" class="cert-filter" aria-label="Filter by status">
     {{range .FilterStatuses}}<a role="button" href="/t/{{$.Token}}/certs?status={{.}}{{if $.Query}}&amp;q={{$.Query}}{{end}}" class="small{{if ne . $.StatusFilter}} outline{{end}}" {{if eq . $.StatusFilter}}aria-current="true"{{end}}>{{.}}</a>{{end}}
 </div>
-<p><small class="muted">{{len .Certs}} of {{.Total}} cert(s). Sorted by expiry (most-urgent first).</small></p>
+<p><small class="muted">{{len .Certs}} of {{.Total}} cert(s). Sorted by expiry (most-urgent first). EXPIRING marks deploy certs that expire within {{.DeployWindow}} and the others within 24h.</small></p>
 {{if not .Certs}}
 <article>
     <strong>No cert matches the filter.</strong>
 </article>
 {{else}}
-<div class="table-scroll">
-    <table>
-        <thead>
-            <tr>
-                <th>STATUS</th>
-                <th>KEY_ID</th>
-                <th>PRINCIPALS</th>
-                <th>CA</th>
-                <th>EXPIRES_AT</th>
-                <th>TIME_LEFT</th>
-                <th></th>
-            </tr>
-        </thead>
-        <tbody>
-            {{range .Certs}}{{template "cert-row" .}}{{end}}
-        </tbody>
-    </table>
-</div>
+{{if .DeployCerts}}
+<section id="certs-deploy">
+    <h2>CI deploy</h2>
+    <div class="table-scroll">
+        <table>
+            <thead>
+                <tr>
+                    <th>STATUS</th>
+                    <th>REPOSITORY</th>
+                    <th>KEY_ID</th>
+                    <th>PRINCIPALS</th>
+                    <th>CA</th>
+                    <th>EXPIRES_AT</th>
+                    <th>TIME_LEFT</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {{range .DeployCerts}}{{template "cert-row" .}}{{end}}
+            </tbody>
+        </table>
+    </div>
+</section>
+{{end}}
+{{if .OtherCerts}}
+<section id="certs-other">
+    {{if .DeployCerts}}<h2>Other certificates</h2>{{end}}
+    <div class="table-scroll">
+        <table>
+            <thead>
+                <tr>
+                    <th>STATUS</th>
+                    <th>KEY_ID</th>
+                    <th>PRINCIPALS</th>
+                    <th>CA</th>
+                    <th>EXPIRES_AT</th>
+                    <th>TIME_LEFT</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {{range .OtherCerts}}{{template "cert-row" .}}{{end}}
+            </tbody>
+        </table>
+    </div>
+</section>
+{{end}}
 <div id="cert-dialog"></div>
 {{end}}
 {{end}}
