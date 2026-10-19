@@ -284,17 +284,30 @@ type EndpointView struct {
 	StatusClass string
 	Uptime      string
 	Token       string
+	SSHCommand  string // the command the Copy SSH button copies
 }
 
-func resolveBastionhubConfig(flagVal string) string {
-	if flagVal != "" {
-		return flagVal
+// configFlags collects the values of the repeatable --config flag.
+type configFlags []string
+
+func (c *configFlags) String() string { return strings.Join(*c, ",") }
+
+func (c *configFlags) Set(v string) error {
+	*c = append(*c, v)
+	return nil
+}
+
+// resolveBastionhubConfigs returns the endpoints.yaml files, one per bastion:
+// the --config values in flag order, else $BASTIONHUB_CONFIG, else the default path.
+func resolveBastionhubConfigs(flagVals []string) []string {
+	if len(flagVals) > 0 {
+		return flagVals
 	}
 	if env := os.Getenv("BASTIONHUB_CONFIG"); env != "" {
-		return env
+		return []string{env}
 	}
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".config", "bastionhub", "endpoints.yaml")
+	return []string{filepath.Join(home, ".config", "bastionhub", "endpoints.yaml")}
 }
 
 // parseBastionhubStatus parses the tabular output of `bastionhub status`.
@@ -347,7 +360,9 @@ func readEndpoints(configPath, bastionhubPath string) ([]EndpointView, error) {
 	// Try to fetch live status — failure is non-fatal; views fall back to "?"
 	liveStatus := map[string][2]string{}
 	if bastionhubPath != "" {
-		out, err := exec.Command(bastionhubPath, "status").CombinedOutput()
+		cmd := exec.Command(bastionhubPath, "status")
+		cmd.Env = append(os.Environ(), "BASTIONHUB_CONFIG="+configPath)
+		out, err := cmd.CombinedOutput()
 		if err == nil {
 			liveStatus = parseBastionhubStatus(string(out))
 		}
@@ -402,24 +417,24 @@ func readEndpoints(configPath, bastionhubPath string) ([]EndpointView, error) {
 // -----------------------------------------------------------------------------
 
 type app struct {
-	detected         detected
-	tmpl             *template.Template
-	token            string
-	caDir            string
-	bastionhubConfig string
-	shipTarget       string // optional --krl-ship target; empty = local-only revoke
+	detected          detected
+	tmpl              *template.Template
+	token             string
+	caDir             string
+	bastionhubConfigs []string // one endpoints.yaml per bastion; the first is the default
+	shipTarget        string   // optional --krl-ship target; empty = local-only revoke
 }
 
 func (a *app) viewData(view string, extra map[string]any) map[string]any {
 	data := map[string]any{
-		"Title":            "sshboard",
-		"Version":          version,
-		"Detected":         a.detected,
-		"Token":            a.token,
-		"View":             view,
-		"CADir":            a.caDir,
-		"BastionhubConfig": a.bastionhubConfig,
-		"ShipTarget":       a.shipTarget,
+		"Title":             "sshboard",
+		"Version":           version,
+		"Detected":          a.detected,
+		"Token":             a.token,
+		"View":              view,
+		"CADir":             a.caDir,
+		"BastionhubConfigs": a.bastionhubConfigs,
+		"ShipTarget":        a.shipTarget,
 	}
 	for k, v := range extra {
 		data[k] = v
@@ -597,28 +612,52 @@ func (a *app) issuanceLog(w http.ResponseWriter, r *http.Request) {
 	a.render(w, "log", extra)
 }
 
-// endpointsExtra returns the Endpoints view's data: the endpoints, or an Error,
-// and the values to prefill the enroll form with (none).
-func (a *app) endpointsExtra() map[string]any {
-	extra := map[string]any{"EnrollForm": url.Values{}}
+// selectConfig returns the endpoints.yaml named by the request's "config"
+// value, which must be one of the --config files; an empty value selects the first.
+func (a *app) selectConfig(value string) (string, bool) {
+	if value == "" {
+		return a.bastionhubConfigs[0], true
+	}
+	return value, slices.Contains(a.bastionhubConfigs, value)
+}
+
+// endpointsExtra returns the Endpoints view's data for the bastion whose
+// endpoints.yaml is config: the endpoints, or an Error, and the values to
+// prefill the enroll form with (none).
+func (a *app) endpointsExtra(config string) map[string]any {
+	extra := map[string]any{"EnrollForm": url.Values{}, "BastionhubConfig": config}
 	if a.detected.Bastionhub == "" {
 		extra["Error"] = "bastionhub not detected on PATH."
 		return extra
 	}
-	views, err := readEndpoints(a.bastionhubConfig, a.detected.Bastionhub)
+	views, err := readEndpoints(config, a.detected.Bastionhub)
 	if err != nil {
-		extra["Error"] = fmt.Sprintf("Reading %s: %v", a.bastionhubConfig, err)
+		extra["Error"] = fmt.Sprintf("Reading %s: %v", config, err)
 		return extra
+	}
+	// With more than one bastion, the copied command names the selected
+	// endpoints.yaml, since the operator's shell resolves only one.
+	prefix := ""
+	if len(a.bastionhubConfigs) > 1 {
+		prefix = "BASTIONHUB_CONFIG='" + strings.ReplaceAll(config, "'", `'\''`) + "' "
 	}
 	for i := range views {
 		views[i].Token = a.token
+		views[i].SSHCommand = prefix + "bastionhub ssh " + views[i].Name
 	}
 	extra["Endpoints"] = views
 	return extra
 }
 
-func (a *app) endpoints(w http.ResponseWriter, _ *http.Request) {
-	a.render(w, "endpoints", a.endpointsExtra())
+// endpoints handles GET /t/<token>/endpoints?config=<endpoints.yaml>.
+// An absent config is the first --config file; a path that is not one of them returns 400.
+func (a *app) endpoints(w http.ResponseWriter, r *http.Request) {
+	config, ok := a.selectConfig(r.URL.Query().Get("config"))
+	if !ok {
+		http.Error(w, "unknown config", http.StatusBadRequest)
+		return
+	}
+	a.render(w, "endpoints", a.endpointsExtra(config))
 }
 
 // endpointResult is the outcome of an endpoint action, shown above the table.
@@ -628,19 +667,19 @@ type endpointResult struct {
 	Failed bool
 }
 
-// runBastionhub runs bastionhub with BASTIONHUB_CONFIG set to the file the
-// Endpoints view reads; bastionhub has no flag for the config path.
-func (a *app) runBastionhub(args ...string) ([]byte, error) {
+// runBastionhub runs bastionhub with BASTIONHUB_CONFIG set to the selected
+// bastion's endpoints.yaml; bastionhub has no flag for the config path.
+func (a *app) runBastionhub(config string, args ...string) ([]byte, error) {
 	cmd := exec.Command(a.detected.Bastionhub, args...)
-	cmd.Env = append(os.Environ(), "BASTIONHUB_CONFIG="+a.bastionhubConfig)
+	cmd.Env = append(os.Environ(), "BASTIONHUB_CONFIG="+config)
 	return cmd.CombinedOutput()
 }
 
 // renderEndpointsResult writes the #endpoints-view element, the target the
 // action forms swap with outerHTML, re-read after the action, with the action's result above the table and the enroll
 // form prefilled with form. Status is 200 also on failure, so that HTMX swaps.
-func (a *app) renderEndpointsResult(w http.ResponseWriter, res endpointResult, form url.Values) {
-	extra := a.endpointsExtra()
+func (a *app) renderEndpointsResult(w http.ResponseWriter, config string, res endpointResult, form url.Values) {
+	extra := a.endpointsExtra(config)
 	extra["Result"] = res
 	if form != nil {
 		extra["EnrollForm"] = form
@@ -656,7 +695,7 @@ func (a *app) renderEndpointsResult(w http.ResponseWriter, res endpointResult, f
 var enrollFlags = []string{"pubkey-file", "user", "port", "identity", "description", "valid", "principal"}
 
 // enrollEndpoint handles POST /t/<token>/api/endpoint/enroll
-// Form: name and the fields of enrollFlags. Runs `bastionhub endpoint enroll`
+// Form: config (as for the Endpoints view), name and the fields of enrollFlags. Runs `bastionhub endpoint enroll`
 // with --ca-dir set to sshboard's CA dir. Flags are passed as --flag=value so
 // that a value starting with "-" is not parsed as a flag.
 // Returns: the Endpoints view's content fragment with bastionhub's output; on
@@ -670,9 +709,14 @@ func (a *app) enrollEndpoint(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	config, ok := a.selectConfig(r.PostFormValue("config"))
+	if !ok {
+		http.Error(w, "unknown config", http.StatusBadRequest)
+		return
+	}
 	name := strings.TrimSpace(r.PostFormValue("name"))
 	if name == "" || strings.HasPrefix(name, "-") {
-		a.renderEndpointsResult(w, endpointResult{Title: "Enroll failed", Output: `The name is required and must not start with "-".`, Failed: true}, r.PostForm)
+		a.renderEndpointsResult(w, config, endpointResult{Title: "Enroll failed", Output: `The name is required and must not start with "-".`, Failed: true}, r.PostForm)
 		return
 	}
 	args := []string{"endpoint", "enroll", "--ca-dir=" + a.caDir}
@@ -682,16 +726,16 @@ func (a *app) enrollEndpoint(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	args = append(args, name)
-	out, err := a.runBastionhub(args...)
+	out, err := a.runBastionhub(config, args...)
 	if err != nil {
-		a.renderEndpointsResult(w, endpointResult{Title: "Enroll failed for " + name, Output: string(out), Failed: true}, r.PostForm)
+		a.renderEndpointsResult(w, config, endpointResult{Title: "Enroll failed for " + name, Output: string(out), Failed: true}, r.PostForm)
 		return
 	}
-	a.renderEndpointsResult(w, endpointResult{Title: "Enrolled " + name, Output: string(out)}, nil)
+	a.renderEndpointsResult(w, config, endpointResult{Title: "Enrolled " + name, Output: string(out)}, nil)
 }
 
 // unregisterEndpoint handles POST /t/<token>/api/endpoint/unregister
-// Form: name. Runs `bastionhub endpoint unregister <name>`, which removes the
+// Form: config (as for the Endpoints view) and name. Runs `bastionhub endpoint unregister <name>`, which removes the
 // endpoint from endpoints.yaml and does not revoke its certificate.
 // Returns: the Endpoints view's content fragment with bastionhub's output.
 func (a *app) unregisterEndpoint(w http.ResponseWriter, r *http.Request) {
@@ -703,17 +747,22 @@ func (a *app) unregisterEndpoint(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	config, ok := a.selectConfig(r.PostFormValue("config"))
+	if !ok {
+		http.Error(w, "unknown config", http.StatusBadRequest)
+		return
+	}
 	name := r.PostFormValue("name")
 	if name == "" || strings.HasPrefix(name, "-") {
 		http.Error(w, "missing or invalid name", http.StatusBadRequest)
 		return
 	}
-	out, err := a.runBastionhub("endpoint", "unregister", name)
+	out, err := a.runBastionhub(config, "endpoint", "unregister", name)
 	res := endpointResult{Title: "Unregistered " + name, Output: string(out)}
 	if err != nil {
 		res = endpointResult{Title: "Unregister failed for " + name, Output: string(out), Failed: true}
 	}
-	a.renderEndpointsResult(w, res, nil)
+	a.renderEndpointsResult(w, config, res, nil)
 }
 
 // revokeCert handles POST /t/<token>/api/cert/revoke
@@ -927,7 +976,8 @@ func generateToken() string {
 func main() {
 	bind := flag.String("bind", "127.0.0.1:7890", "address to bind (default: 127.0.0.1:7890 — localhost only)")
 	caDirFlag := flag.String("ca-dir", "", "sshca CA directory (default: $SSHCA_CA_DIR, then ./ca)")
-	configFlag := flag.String("config", "", "bastionhub endpoints.yaml path (default: $BASTIONHUB_CONFIG, then ~/.config/bastionhub/endpoints.yaml)")
+	var configFlag configFlags
+	flag.Var(&configFlag, "config", "bastionhub endpoints.yaml path, one per bastion; repeat to switch between bastions in the Endpoints view (default: $BASTIONHUB_CONFIG, then ~/.config/bastionhub/endpoints.yaml)")
 	shipTarget := flag.String("krl-ship", "", "optional scp target for cert revoke (e.g. root@bastion:/etc/ssh/revoked_keys.krl). If unset, revoke updates local KRL only.")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
@@ -945,12 +995,12 @@ func main() {
 	tmpl := template.Must(template.ParseFS(templatesFS, "templates/*.html.tmpl"))
 
 	a := &app{
-		detected:         detectCLIs(),
-		tmpl:             tmpl,
-		token:            generateToken(),
-		caDir:            resolveCaDir(*caDirFlag),
-		bastionhubConfig: resolveBastionhubConfig(*configFlag),
-		shipTarget:       *shipTarget,
+		detected:          detectCLIs(),
+		tmpl:              tmpl,
+		token:             generateToken(),
+		caDir:             resolveCaDir(*caDirFlag),
+		bastionhubConfigs: resolveBastionhubConfigs(configFlag),
+		shipTarget:        *shipTarget,
 	}
 
 	// Startup banner
@@ -971,7 +1021,9 @@ func main() {
 		log.Fatal("Neither sshca nor bastionhub found on PATH — sshboard has nothing to show.")
 	}
 	fmt.Println("CA dir:", a.caDir)
-	fmt.Println("Bastionhub config:", a.bastionhubConfig)
+	for _, config := range a.bastionhubConfigs {
+		fmt.Println("Bastionhub config:", config)
+	}
 	if a.shipTarget != "" {
 		fmt.Println("KRL ship target:", a.shipTarget)
 	}

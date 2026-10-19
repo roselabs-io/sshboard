@@ -12,7 +12,8 @@ binary.
   filtered by `key_id` substring and by status.
 - **Log** — sshca's issuance log entry by entry, in order of time, filtered by
   principal, CA and date range.
-- **Endpoints** — bastionhub's registry with live tunnel state and uptime.
+- **Endpoints** — bastionhub's registry with live tunnel state and uptime, for
+  one bastion at a time when several `--config` files are given.
 
 Actions run the CLIs: `sshca cert revoke`, `sshca cert renew`, `sshca cert
 inspect`, `bastionhub status`, `bastionhub ssh`, `bastionhub endpoint enroll`,
@@ -122,7 +123,8 @@ Auto-discovery, in order:
 
 1. `$SSHCA_CA_DIR` env var (matches sshca's convention)
 2. `$BASTIONHUB_CONFIG` env var
-3. `--ca-dir` and `--config` flags, which override the environment
+3. `--ca-dir` and `--config` flags, which override the environment; `--config`
+   can be repeated, one endpoints.yaml per bastion
 4. The default paths above
 
 ### Filtering certificates
@@ -206,6 +208,29 @@ sshca cert inspect <cert>
   host.
 - The dialog is read-only.
 
+### Switching between bastions
+
+`--config` can be given more than once, one bastionhub endpoints.yaml per
+bastion:
+
+```sh
+sshboard --config ~/.config/bastionhub/endpoints.yaml --config /srv/bastion-eu/endpoints.yaml
+```
+
+- With more than one file, the Endpoints view shows one button per file, by
+  path, above the table. The first `--config` is selected by default.
+- The selection is the query parameter `config` of `/t/<token>/endpoints`,
+  whose value is one of the `--config` paths. Any other value returns
+  `400 Bad Request`.
+- The table, `bastionhub status`, Enroll and Unregister use the selected file:
+  each runs bastionhub with `BASTIONHUB_CONFIG` set to it. The forms submit the
+  path as a `config` field; an unknown path returns `400 Bad Request` without
+  running bastionhub.
+- With more than one file, Copy SSH copies
+  `BASTIONHUB_CONFIG='<config>' bastionhub ssh <name>`.
+- The Certs and Log views are unchanged: there is one `--ca-dir`.
+- When `--config` is given, `$BASTIONHUB_CONFIG` is not read.
+
 ### Enrolling an endpoint
 
 The Endpoints view has an "Enroll an endpoint" form. It runs:
@@ -214,7 +239,7 @@ The Endpoints view has an "Enroll an endpoint" form. It runs:
 BASTIONHUB_CONFIG=<config> bastionhub endpoint enroll --ca-dir=<ca-dir> [--<flag>=<value> ...] <name>
 ```
 
-- `<config>` is the endpoints.yaml the view reads (`--config`,
+- `<config>` is the endpoints.yaml the view reads (the selected `--config`,
   `$BASTIONHUB_CONFIG`, or the default path), and `<ca-dir>` is sshboard's CA
   dir, so the new endpoint and its tunnel certificate appear in the Endpoints
   and Certs views.
