@@ -1,0 +1,74 @@
+{{define "log-content"}}
+<hgroup>
+    <h1>Issuance log</h1>
+    <p>Reading <code>{{.CADir}}/issuance-log.jsonl</code>, read-only.</p>
+</hgroup>
+
+{{if .Error}}
+<article class="error">
+    <strong>Error</strong>
+    <p>{{.Error}}</p>
+</article>
+{{else if not .Total}}
+<article>
+    <strong>(no entries in issuance log yet)</strong>
+</article>
+{{else}}
+<form method="get" action="/t/{{.Token}}/log" class="log-filter">
+    <div class="grid">
+        <label>Principal
+            <select name="principal">
+                <option value="">All</option>
+                {{range .Principals}}<option value="{{.}}"{{if eq . $.Filter.Principal}} selected{{end}}>{{.}}</option>{{end}}
+            </select>
+        </label>
+        <label>CA
+            <select name="ca">
+                {{range .FilterCAs}}<option value="{{.}}"{{if eq . $.Filter.CA}} selected{{end}}>{{.}}</option>{{end}}
+            </select>
+        </label>
+        <label>From
+            <input type="date" name="from" value="{{.FromValue}}">
+        </label>
+        <label>To
+            <input type="date" name="to" value="{{.ToValue}}">
+        </label>
+    </div>
+    <button type="submit" class="small">Filter</button>
+    <a href="/t/{{.Token}}/log" role="button" class="secondary outline small">Clear</a>
+</form>
+<p><small class="muted">{{len .Entries}} of {{.Total}} entries. Sorted by issue time (oldest first); dates are UTC.</small></p>
+{{if not .Entries}}
+<article>
+    <strong>No entry matches the filter.</strong>
+</article>
+{{else}}
+<div class="table-scroll">
+    <table>
+        <thead>
+            <tr>
+                <th>TS</th>
+                <th>CA</th>
+                <th>KEY_ID</th>
+                <th>PRINCIPALS</th>
+                <th>VALID</th>
+                <th>CERT</th>
+            </tr>
+        </thead>
+        <tbody>
+            {{range .Entries}}
+            <tr class="log-row">
+                <td><small>{{.TS}}</small></td>
+                <td>{{.CA}}</td>
+                <td><code>{{.KeyID}}</code></td>
+                <td><code>{{.Principals}}</code></td>
+                <td><small>{{.Valid}}</small></td>
+                <td><small><code>{{.Cert}}</code></small></td>
+            </tr>
+            {{end}}
+        </tbody>
+    </table>
+</div>
+{{end}}
+{{end}}
+{{end}}

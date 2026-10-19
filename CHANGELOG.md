@@ -6,10 +6,27 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-### Added
+### Added — Log view
 
-- The Certs view lists certificates with a `deploy-*` principal in a "CI deploy" table, with the repository taken from the key ID (`<repo>@github-actions`).
-- `--deploy-expiring-within` (default `14d`): deploy certificates that expire within this duration are marked EXPIRING. Other certificates keep the 24h window.
+- **Issuance log tab.** `/t/<token>/log` (new route) lists the issuance log entry by entry, oldest first, filtered by the query parameters `principal` (exact match), `ca` (`ALL`, `user`, `host`) and `from` / `to` (inclusive UTC dates, `YYYY-MM-DD`); an invalid `ca` or date returns 400. Read-only. See README, "Issuance log".
+
+### Added — Certs view
+
+- **Filtering.** A search field filters rows by `key_id` substring (ignoring case) and status buttons by ACTIVE, EXPIRING, EXPIRED or ALL. Both are query parameters of `/t/<token>/certs`: `q` and `status` (default `ALL`; another value returns 400). See README, "Filtering certificates".
+- **Click-to-renew.** Each row with an expiry carries a Renew action that POSTs to `/t/<token>/api/cert/renew`; the server runs `sshca cert renew --ca <ca> --pubkey-file <pubkey> --dir <ca-dir>`, with `--ship <target>` when the confirmation prompt is answered with a target. The pubkey file is the entry's `pubkey` field in the issuance log. Rows whose pubkey file is not on the host show no Renew action. See README, "Renewing a certificate".
+- **Inspect dialog.** Each row carries an Inspect action that GETs `/t/<token>/api/cert/inspect`; the server runs `sshca cert inspect <cert>`, where `<cert>` is the entry's `cert` field in the issuance log, and returns a dialog holding the output. See README, "Inspecting a certificate".
+- **CI deploy group.** Certificates with a `deploy-*` principal are listed in a "CI deploy" table, with the repository taken from the key ID (`<repo>@github-actions`). See README, "CI deploy certificates".
+- **`--deploy-expiring-within`** (default `14d`): deploy certificates that expire within this duration are marked EXPIRING. Other certificates keep the 24h window.
+
+### Added — Endpoints view
+
+- **Enroll form.** An "Enroll an endpoint" form POSTs to `/t/<token>/api/endpoint/enroll`; the server runs `bastionhub endpoint enroll --ca-dir=<ca-dir> [--<flag>=<value> ...] <name>` with `BASTIONHUB_CONFIG` set to the endpoints.yaml the view reads. See README, "Enrolling an endpoint".
+- **Unregister.** Each row carries an Unregister action, behind a confirmation, that POSTs to `/t/<token>/api/endpoint/unregister`; the server runs `bastionhub endpoint unregister <name>`. The endpoint's certificate is not revoked. See README, "Unregistering an endpoint".
+- **Bastion switch.** `--config` can be repeated, one endpoints.yaml per bastion. With more than one, the Endpoints view shows a button per file and reads the one named by the new query parameter `config` of `/t/<token>/endpoints` (default: the first `--config`; another value returns 400). Enroll, Unregister and `bastionhub status` run with `BASTIONHUB_CONFIG` set to the selected file, and Copy SSH prefixes `BASTIONHUB_CONFIG='<config>'`. See README, "Switching between bastions".
+
+### Changed — Endpoints view
+
+- `bastionhub status` runs with `BASTIONHUB_CONFIG` set to the endpoints.yaml the view reads; it inherited sshboard's environment, so with `--config` set it reported on `$BASTIONHUB_CONFIG` or the default file.
 
 ## [0.1.0] — 2026-05-29
 

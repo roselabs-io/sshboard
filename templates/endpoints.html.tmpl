@@ -4,6 +4,41 @@
     <p>Reading <code>{{.BastionhubConfig}}</code> + live tunnel state via <code>bastionhub status</code>.</p>
 </hgroup>
 
+{{if gt (len .BastionhubConfigs) 1}}
+<div role="group" class="bastion-switch" aria-label="Bastion">
+    {{range .BastionhubConfigs}}<a role="button" href="/t/{{$.Token}}/endpoints?config={{.}}" class="small{{if ne . $.BastionhubConfig}} outline{{end}}" {{if eq . $.BastionhubConfig}}aria-current="true"{{end}}>{{.}}</a>{{end}}
+</div>
+{{end}}
+
+{{template "endpoints-view" .}}
+
+<script>
+    function copyAndConfirm(btn) {
+        const text = btn.getAttribute('data-copy');
+        navigator.clipboard.writeText(text).then(() => {
+            const orig = btn.textContent;
+            btn.textContent = '✓ Copied';
+            btn.disabled = true;
+            setTimeout(() => {
+                btn.textContent = orig;
+                btn.disabled = false;
+            }, 1200);
+        }).catch((err) => {
+            alert('Copy failed: ' + err);
+        });
+    }
+</script>
+{{end}}
+
+{{define "endpoints-view"}}
+<div id="endpoints-view">
+{{with .Result}}
+<article{{if .Failed}} class="error"{{end}}>
+    <strong>{{.Title}}</strong>
+    <pre>{{.Output}}</pre>
+</article>
+{{end}}
+
 {{if .Error}}
 <article class="error">
     <strong>Error</strong>
@@ -40,10 +75,18 @@
                 <td><small>{{.Description}}</small></td>
                 <td>
                     <button class="secondary outline small"
-                            data-copy="bastionhub ssh {{.Name}}"
+                            data-copy="{{.SSHCommand}}"
                             onclick="copyAndConfirm(this)">
                         Copy SSH
                     </button>
+                    <form hx-post="/t/{{.Token}}/api/endpoint/unregister"
+                          hx-target="#endpoints-view"
+                          hx-swap="outerHTML"
+                          hx-confirm="Unregister endpoint {{.Name}}? bastionhub removes it from endpoints.yaml. Its tunnel certificate is not revoked; revoke it from the Certs view.">
+                        <input type="hidden" name="config" value="{{$.BastionhubConfig}}">
+                        <input type="hidden" name="name" value="{{.Name}}">
+                        <button type="submit" class="secondary outline small">Unregister</button>
+                    </form>
                 </td>
             </tr>
             {{end}}
@@ -52,20 +95,47 @@
 </div>
 {{end}}
 
-<script>
-    function copyAndConfirm(btn) {
-        const text = btn.getAttribute('data-copy');
-        navigator.clipboard.writeText(text).then(() => {
-            const orig = btn.textContent;
-            btn.textContent = '✓ Copied';
-            btn.disabled = true;
-            setTimeout(() => {
-                btn.textContent = orig;
-                btn.disabled = false;
-            }, 1200);
-        }).catch((err) => {
-            alert('Copy failed: ' + err);
-        });
-    }
-</script>
+{{if not .Error}}
+<details{{if .Result}}{{if .Result.Failed}} open{{end}}{{end}}>
+    <summary>Enroll an endpoint</summary>
+    <p><small class="muted">Runs <code>bastionhub endpoint enroll</code>: sshca signs the endpoint's tunnel key (CA dir <code>{{.CADir}}</code>), then the endpoint is registered. Empty fields take bastionhub's defaults.</small></p>
+    <form hx-post="/t/{{.Token}}/api/endpoint/enroll"
+          hx-target="#endpoints-view"
+          hx-swap="outerHTML">
+        <input type="hidden" name="config" value="{{.BastionhubConfig}}">
+        <div class="grid">
+            <label>Name
+                <input type="text" name="name" required value="{{.EnrollForm.Get "name"}}">
+            </label>
+            <label>Pubkey file
+                <input type="text" name="pubkey-file" required placeholder="path on this host, from bastionhub endpoint install" value="{{.EnrollForm.Get "pubkey-file"}}">
+            </label>
+        </div>
+        <div class="grid">
+            <label>User
+                <input type="text" name="user" placeholder="root" value="{{.EnrollForm.Get "user"}}">
+            </label>
+            <label>Port
+                <input type="number" name="port" placeholder="next free in 12001-12099" value="{{.EnrollForm.Get "port"}}">
+            </label>
+            <label>Identity
+                <input type="text" name="identity" placeholder="SSH key for this endpoint" value="{{.EnrollForm.Get "identity"}}">
+            </label>
+        </div>
+        <div class="grid">
+            <label>Validity
+                <input type="text" name="valid" placeholder="+52w" value="{{.EnrollForm.Get "valid"}}">
+            </label>
+            <label>Principal
+                <input type="text" name="principal" placeholder="gw-tunnel" value="{{.EnrollForm.Get "principal"}}">
+            </label>
+        </div>
+        <label>Description
+            <input type="text" name="description" value="{{.EnrollForm.Get "description"}}">
+        </label>
+        <button type="submit">Enroll</button>
+    </form>
+</details>
+{{end}}
+</div>
 {{end}}
