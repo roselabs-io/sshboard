@@ -485,6 +485,118 @@ func (a *app) certs(w http.ResponseWriter, r *http.Request) {
 	a.render(w, "certs", extra)
 }
 
+// logFilterCAs are the values of the Log view's CA filter.
+var logFilterCAs = []string{"ALL", "user", "host"}
+
+// LogFilter selects issuance-log entries. Empty Principal keeps every
+// principal; a zero From or To leaves that end of the date range open.
+type LogFilter struct {
+	Principal string
+	CA        string // one of logFilterCAs
+	From, To  time.Time
+}
+
+// filterLog keeps the entries that list f.Principal among their principals,
+// were issued by f.CA ("ALL" keeps both) and whose ts falls, as a UTC date,
+// between f.From and f.To inclusive. An entry whose ts does not parse is kept
+// only when no date bound is set.
+func filterLog(entries []logEntry, f LogFilter) []logEntry {
+	var kept []logEntry
+	for _, e := range entries {
+		if f.CA != "ALL" && e.CA != f.CA {
+			continue
+		}
+		if f.Principal != "" && !slices.Contains(strings.Split(e.Principals, ","), f.Principal) {
+			continue
+		}
+		if !f.From.IsZero() || !f.To.IsZero() {
+			ts, err := time.Parse(time.RFC3339, e.TS)
+			if err != nil {
+				continue
+			}
+			day := ts.UTC().Truncate(24 * time.Hour)
+			if (!f.From.IsZero() && day.Before(f.From)) || (!f.To.IsZero() && day.After(f.To)) {
+				continue
+			}
+		}
+		kept = append(kept, e)
+	}
+	return kept
+}
+
+// sortLogByTime orders entries by ts ascending, keeping file order between
+// equal timestamps.
+func sortLogByTime(entries []logEntry) {
+	slices.SortStableFunc(entries, func(x, y logEntry) int {
+		tx, _ := time.Parse(time.RFC3339, x.TS)
+		ty, _ := time.Parse(time.RFC3339, y.TS)
+		return tx.Compare(ty)
+	})
+}
+
+// logPrincipals returns the distinct principals of entries, sorted.
+func logPrincipals(entries []logEntry) []string {
+	var ps []string
+	for _, e := range entries {
+		for _, p := range strings.Split(e.Principals, ",") {
+			if p != "" && !slices.Contains(ps, p) {
+				ps = append(ps, p)
+			}
+		}
+	}
+	slices.Sort(ps)
+	return ps
+}
+
+// issuanceLog handles GET /t/<token>/log?principal=<p>&ca=<ca>&from=<date>&to=<date>.
+// Dates are YYYY-MM-DD in UTC; an empty or absent ca is ALL.
+func (a *app) issuanceLog(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	f := LogFilter{Principal: q.Get("principal"), CA: q.Get("ca")}
+	if f.CA == "" {
+		f.CA = "ALL"
+	}
+	if !slices.Contains(logFilterCAs, f.CA) {
+		http.Error(w, "invalid ca", http.StatusBadRequest)
+		return
+	}
+	for _, bound := range []struct {
+		name string
+		dst  *time.Time
+	}{{"from", &f.From}, {"to", &f.To}} {
+		if v := q.Get(bound.name); v != "" {
+			d, err := time.Parse(time.DateOnly, v)
+			if err != nil {
+				http.Error(w, "invalid "+bound.name+" date", http.StatusBadRequest)
+				return
+			}
+			*bound.dst = d
+		}
+	}
+	extra := map[string]any{
+		"Filter":    f,
+		"FilterCAs": logFilterCAs,
+		"FromValue": q.Get("from"),
+		"ToValue":   q.Get("to"),
+	}
+	if a.detected.Sshca == "" {
+		extra["Error"] = "sshca not detected on PATH."
+		a.render(w, "log", extra)
+		return
+	}
+	entries, err := readLog(a.caDir)
+	if err != nil {
+		extra["Error"] = fmt.Sprintf("Reading audit log at %s/issuance-log.jsonl: %v", a.caDir, err)
+		a.render(w, "log", extra)
+		return
+	}
+	sortLogByTime(entries)
+	extra["Total"] = len(entries)
+	extra["Principals"] = logPrincipals(entries)
+	extra["Entries"] = filterLog(entries, f)
+	a.render(w, "log", extra)
+}
+
 // endpointsExtra returns the Endpoints view's data: the endpoints, or an Error,
 // and the values to prefill the enroll form with (none).
 func (a *app) endpointsExtra() map[string]any {
@@ -827,7 +939,7 @@ func main() {
 
 	// Parse all templates as a single template tree. Each view's content
 	// template has a distinct name (index-content, certs-content,
-	// endpoints-content); the layout's switch dispatches on .View.
+	// log-content, endpoints-content); the layout's switch dispatches on .View.
 	// Partials like cert-row are also defined in their own files and
 	// available globally for the API handlers.
 	tmpl := template.Must(template.ParseFS(templatesFS, "templates/*.html.tmpl"))
@@ -878,6 +990,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc(prefix+"/", a.index)
 	mux.HandleFunc(prefix+"/certs", a.certs)
+	mux.HandleFunc(prefix+"/log", a.issuanceLog)
 	mux.HandleFunc(prefix+"/endpoints", a.endpoints)
 	mux.HandleFunc(prefix+"/api/cert/revoke", a.revokeCert)
 	mux.HandleFunc(prefix+"/api/cert/renew", a.renewCert)

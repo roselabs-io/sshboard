@@ -108,3 +108,9 @@ a[role="button"].small {
     padding: 0.25em 0.7em;
     font-size: 0.85em;
 }
+
+/* --- Log filter --- */
+
+.log-filter {
+    margin-bottom: 0.75rem;
+}

@@ -25,6 +25,13 @@
                         {{end}}
                     </li>
                     <li>
+                        {{if .Detected.Sshca}}
+                            <a href="/t/{{.Token}}/log" {{if eq .View "log"}}aria-current="page"{{end}}>Log</a>
+                        {{else}}
+                            <span class="muted" title="sshca not detected">Log</span>
+                        {{end}}
+                    </li>
+                    <li>
                         {{if .Detected.Bastionhub}}
                             <a href="/t/{{.Token}}/endpoints" {{if eq .View "endpoints"}}aria-current="page"{{end}}>Endpoints</a>
                         {{else}}
@@ -37,6 +44,7 @@
 
         {{if eq .View "index"}}{{template "index-content" .}}
         {{else if eq .View "certs"}}{{template "certs-content" .}}
+        {{else if eq .View "log"}}{{template "log-content" .}}
         {{else if eq .View "endpoints"}}{{template "endpoints-content" .}}
         {{end}}
 

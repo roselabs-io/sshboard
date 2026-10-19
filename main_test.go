@@ -493,3 +493,69 @@ func TestEndpointsRenderUnregisterPerRow(t *testing.T) {
 		t.Errorf("the view has no enroll form:\n%s", body)
 	}
 }
+
+// TestIssuanceLog covers GET /log: entries in ts order regardless of file
+// order, and the principal, CA and inclusive UTC date-range filters.
+func TestIssuanceLog(t *testing.T) {
+	dir := t.TempDir()
+	entry := func(keyID, ts, ca, principals string) string {
+		return fmt.Sprintf(`{"ts":%q,"ca":%q,"key_id":%q,"principals":%q,"valid":"+8h","pubkey":"x.pub","cert":"x"}`+"\n",
+			ts, ca, keyID, principals)
+	}
+	log := entry("c-host", "2026-05-03T09:00:00Z", "host", "bastion.example") +
+		entry("a-alice", "2026-05-01T23:30:00Z", "user", "alice,root") +
+		entry("b-bob", "2026-05-02T00:30:00+02:00", "user", "bob") +
+		entry("d-alice", "2026-05-04T12:00:00Z", "user", "alice")
+	if err := os.WriteFile(filepath.Join(dir, "issuance-log.jsonl"), []byte(log), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tmpl := template.Must(template.ParseFS(templatesFS, "templates/*.html.tmpl"))
+	a := &app{detected: detected{Sshca: "sshca"}, tmpl: tmpl, token: "tok", caDir: dir}
+
+	cases := []struct {
+		query    string
+		wantCode int
+		want     []string // key_ids, in rendered order
+	}{
+		// b-bob is 2026-05-01T22:30Z, before a-alice.
+		{"", 200, []string{"b-bob", "a-alice", "c-host", "d-alice"}},
+		{"?principal=alice", 200, []string{"a-alice", "d-alice"}},
+		{"?principal=root", 200, []string{"a-alice"}},
+		{"?principal=ali", 200, nil},
+		{"?ca=host", 200, []string{"c-host"}},
+		{"?ca=user&principal=bob", 200, []string{"b-bob"}},
+		{"?from=2026-05-02", 200, []string{"c-host", "d-alice"}},
+		{"?to=2026-05-01", 200, []string{"b-bob", "a-alice"}},
+		{"?from=2026-05-03&to=2026-05-03", 200, []string{"c-host"}},
+		{"?from=2026-05-01&to=2026-05-04&ca=user&principal=alice", 200, []string{"a-alice", "d-alice"}},
+		{"?ca=root", 400, nil},
+		{"?from=05/01/2026", 400, nil},
+		{"?to=2026-13-01", 400, nil},
+	}
+	for _, c := range cases {
+		t.Run(c.query, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			a.issuanceLog(rec, httptest.NewRequest("GET", "/t/tok/log"+c.query, nil))
+			if rec.Code != c.wantCode {
+				t.Fatalf("status = %d, want %d: %s", rec.Code, c.wantCode, rec.Body)
+			}
+			if c.wantCode != 200 {
+				return
+			}
+			var got []string
+			for _, row := range strings.Split(rec.Body.String(), `<tr class="log-row">`)[1:] {
+				for _, k := range []string{"a-alice", "b-bob", "c-host", "d-alice"} {
+					if strings.Contains(row, "<code>"+k+"</code>") {
+						got = append(got, k)
+					}
+				}
+			}
+			if !slices.Equal(got, c.want) {
+				t.Errorf("rows = %v, want %v", got, c.want)
+			}
+			if wantCount := fmt.Sprintf("%d of 4 entries", len(c.want)); !strings.Contains(rec.Body.String(), wantCount) {
+				t.Errorf("body lacks %q", wantCount)
+			}
+		})
+	}
+}
