@@ -423,7 +423,7 @@ printf 'endpoints:\n  new-ep: {port: 12002, user: root}\n' > "$BASTIONHUB_CONFIG
 				t.Fatal(err)
 			}
 			tmpl := template.Must(template.ParseFS(templatesFS, "templates/*.html.tmpl"))
-			a := &app{detected: detected{Bastionhub: bastionhub}, tmpl: tmpl, token: "tok", caDir: dir, bastionhubConfig: config}
+			a := &app{detected: detected{Bastionhub: bastionhub}, tmpl: tmpl, token: "tok", caDir: dir, bastionhubConfigs: []string{config}}
 
 			req := httptest.NewRequest("POST", "/t/tok/api/endpoint/"+c.action, strings.NewReader(c.form.Encode()))
 			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -478,7 +478,7 @@ func TestEndpointsRenderUnregisterPerRow(t *testing.T) {
 		t.Fatal(err)
 	}
 	tmpl := template.Must(template.ParseFS(templatesFS, "templates/*.html.tmpl"))
-	a := &app{detected: detected{Bastionhub: "/bin/false"}, tmpl: tmpl, token: "tok", bastionhubConfig: config}
+	a := &app{detected: detected{Bastionhub: "/bin/false"}, tmpl: tmpl, token: "tok", bastionhubConfigs: []string{config}}
 	rec := httptest.NewRecorder()
 	a.endpoints(rec, httptest.NewRequest("GET", "/t/tok/endpoints", nil))
 	body := rec.Body.String()
@@ -491,6 +491,105 @@ func TestEndpointsRenderUnregisterPerRow(t *testing.T) {
 	}
 	if !strings.Contains(body, `hx-post="/t/tok/api/endpoint/enroll"`) {
 		t.Errorf("the view has no enroll form:\n%s", body)
+	}
+}
+
+// TestEndpointsSwitchBastion covers the Endpoints view with two --config
+// files: the config query parameter selects the endpoints.yaml that is read,
+// that `bastionhub status` and the actions run against, and that the copied
+// SSH command names. The fake bastionhub reports "UP" for every endpoint of
+// the file named by BASTIONHUB_CONFIG and records that file for actions.
+func TestEndpointsSwitchBastion(t *testing.T) {
+	dir := t.TempDir()
+	configA := filepath.Join(dir, "a.yaml")
+	configB := filepath.Join(dir, "it's b.yaml")
+	if err := os.WriteFile(configA, []byte("endpoints:\n  ep-a: {port: 12001, user: root}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configB, []byte("endpoints:\n  ep-b: {port: 12001, user: root}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	bastionhub := filepath.Join(dir, "bastionhub")
+	script := fmt.Sprintf(`#!/bin/sh
+if [ "$1" = status ]; then
+	echo 'NAME PORT STATUS UPTIME DESCRIPTION'
+	sed -n 's/^  \([a-z-]*\):.*/\1 12001 UP 01:00:00/p' "$BASTIONHUB_CONFIG"
+	exit 0
+fi
+printf '%%s' "$BASTIONHUB_CONFIG" > %q
+`, filepath.Join(dir, "used-config"))
+	if err := os.WriteFile(bastionhub, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	tmpl := template.Must(template.ParseFS(templatesFS, "templates/*.html.tmpl"))
+	a := &app{detected: detected{Bastionhub: bastionhub}, tmpl: tmpl, token: "tok", bastionhubConfigs: []string{configA, configB}}
+
+	for _, c := range []struct {
+		query, wantEP, wantConfig string
+	}{
+		{"", "ep-a", configA},
+		{"?config=" + url.QueryEscape(configB), "ep-b", configB},
+	} {
+		rec := httptest.NewRecorder()
+		a.endpoints(rec, httptest.NewRequest("GET", "/t/tok/endpoints"+c.query, nil))
+		body := rec.Body.String()
+		other := map[string]string{"ep-a": "ep-b", "ep-b": "ep-a"}[c.wantEP]
+		if !strings.Contains(body, `id="endpoint-row-`+c.wantEP+`"`) || strings.Contains(body, `id="endpoint-row-`+other+`"`) {
+			t.Errorf("%q: want only %s's rows:\n%s", c.query, c.wantEP, body)
+		}
+		if !strings.Contains(body, `status-up`) {
+			t.Errorf("%q: bastionhub status did not run against %s:\n%s", c.query, c.wantConfig, body)
+		}
+		escaped := template.HTMLEscapeString(c.wantConfig)
+		if strings.Count(body, `name="config" value="`+escaped+`"`) != 2 {
+			t.Errorf("%q: the unregister and enroll forms should carry config %s:\n%s", c.query, c.wantConfig, body)
+		}
+		if !strings.Contains(body, `aria-current="true">`+escaped+`</a>`) || strings.Count(body, `href="/t/tok/endpoints?config=`) != 2 {
+			t.Errorf("%q: want a switch with both configs, %s selected:\n%s", c.query, c.wantConfig, body)
+		}
+	}
+
+	rec := httptest.NewRecorder()
+	a.endpoints(rec, httptest.NewRequest("GET", "/t/tok/endpoints?config=%2Fetc%2Fother.yaml", nil))
+	if rec.Code != 400 {
+		t.Errorf("unknown config: status = %d, want 400", rec.Code)
+	}
+
+	rec = httptest.NewRecorder()
+	a.endpoints(rec, httptest.NewRequest("GET", "/t/tok/endpoints?config="+url.QueryEscape(configB), nil))
+	if want := template.HTMLEscapeString(`BASTIONHUB_CONFIG='` + filepath.Join(dir, `it'\''s b.yaml`) + `' bastionhub ssh ep-b`); !strings.Contains(rec.Body.String(), `data-copy="`+want+`"`) {
+		t.Errorf("want the copied command to name config B, %s:\n%s", want, rec.Body)
+	}
+
+	for _, c := range []struct {
+		config   string
+		wantCode int
+	}{
+		{configB, 200},
+		{"/etc/other.yaml", 400},
+	} {
+		os.Remove(filepath.Join(dir, "used-config"))
+		form := url.Values{"config": {c.config}, "name": {"ep-b"}}
+		req := httptest.NewRequest("POST", "/t/tok/api/endpoint/unregister", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec := httptest.NewRecorder()
+		a.unregisterEndpoint(rec, req)
+		if rec.Code != c.wantCode {
+			t.Fatalf("unregister with config %s: status = %d, want %d", c.config, rec.Code, c.wantCode)
+		}
+		used, err := os.ReadFile(filepath.Join(dir, "used-config"))
+		if c.wantCode != 200 {
+			if err == nil {
+				t.Errorf("bastionhub ran for unknown config %s", c.config)
+			}
+			continue
+		}
+		if string(used) != configB {
+			t.Errorf("BASTIONHUB_CONFIG = %q, want %q", used, configB)
+		}
+		if !strings.Contains(rec.Body.String(), `id="endpoint-row-ep-b"`) {
+			t.Errorf("want the view re-read from config B:\n%s", rec.Body)
+		}
 	}
 }
 
