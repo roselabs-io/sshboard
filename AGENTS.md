@@ -23,7 +23,7 @@ Templates and static assets are embedded with `go:embed`; there is no JavaScript
 | `.github/workflows/sshboard-ci.yml` | `validate` (PR metadata) and `gate` (`just gate`) |
 | `.github/workflows/sshboard-pm.yml` | the issue and board sync of Governor |
 | `pipeline.yaml` | the Governor dispatcher's config for this repository |
-| `tools/local_preflight.py` | the local check the dispatcher runs: `just check`, then `just gate` |
+| Governor's package preflight (`tools/local_preflight.py` of the Governor package, run by the dispatcher; this repository keeps no copy) | the local check the dispatcher runs: `just check`, then `just gate` |
 
 No key or token is tracked. A merge into `main` deploys nothing; a `v*` tag creates a GitHub
 Release; for a tag without `-`, the `homebrew` job of `release.yml` then sends a `release`
