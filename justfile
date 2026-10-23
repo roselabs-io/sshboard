@@ -13,6 +13,11 @@ test:
 browser-test:
     npm run test:browser
 
+# The browser tier: tests with the `browser` build tag drive the views in headless Chrome or Chromium through
+# chromedp. A test skips when no Chrome or Chromium executable is found; `ubuntu-latest` runners have Chrome.
+browser:
+    go test -tags browser -run TestBrowser ./...
+
 # `go build` with CGO_ENABLED=0 for the six release targets of `release.yml` (the build matrix of `ci.yml`).
 # The binaries are written to a temporary directory and removed.
 build:
@@ -38,13 +43,15 @@ scan:
         print(f"{filename}: {kind} {digest} is not in .secrets.baseline", file=sys.stderr)
     sys.exit(1 if new else 0)
 
-# Dependency advisory checks. Need the network; CI runs them outside the gate in audit.yml.
+# Dependency advisory checks. Need the network; CI runs them outside the gate in `audit.yml`. govulncheck is pinned
+# outside go.mod; v1.7.0 is the last release that builds with the Go version of `go.mod` (1.25); v1.8.0 and later
+# require Go 1.26.
 audit:
-    go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+    go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./...
     npm audit --package-lock-only
 
 # The deterministic gate CI runs.
-gate: check scan test build
+gate: check scan test browser build
 
 # Apply the formatter.
 fix:

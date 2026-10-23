@@ -42,10 +42,11 @@ recorded in this repository.
 | `just check` | `go vet ./...`; fails when `gofmt -l .` lists a file |
 | `just test` | `go test ./...` |
 | `just browser-test` | Playwright Chromium flow in `tests/browser/`; requires Node.js 24, `npm ci` and `npx playwright install chromium` (`--with-deps` on Linux) |
+| `just browser` | `go test -tags browser -run TestBrowser ./...`: browser tests (chromedp) in headless Chrome or Chromium; a test skips when neither is installed |
 | `just build` | `go build` with `CGO_ENABLED=0` for linux, darwin and windows on amd64 and arm64, into a temporary directory |
 | `just scan` | `detect-secrets scan --no-verify` (detect-secrets 1.5.0, through `uvx`) of the tracked files; fails on a finding not in `.secrets.baseline` |
-| `just audit` | `govulncheck ./...` (govulncheck v1.9.0, through `go run`), then `npm audit --package-lock-only`; needs Node.js 24 and the network and is not part of the gate |
-| `just gate` | `check`, `scan`, `test`, `build`; the deterministic gate CI runs |
+| `just audit` | `govulncheck ./...` (govulncheck v1.7.0, the last release that builds with Go 1.25, through `go run`), then `npm audit --package-lock-only`; needs Node.js 24 and the network and is not part of the gate |
+| `just gate` | `check`, `scan`, `test`, `browser`, `build`; the deterministic gate CI runs |
 | `just fix` | `gofmt -w .` |
 | `just ff` | switches to `main` and fast-forwards it from `origin`; refuses local changes or a diverged `main` |
 
@@ -62,7 +63,8 @@ stops its server and removes its temporary files before returning. It needs no i
 bastionhub, CA keys or external service. It currently runs on macOS and Linux.
 
 The `browser` job of `sshboard-ci.yml` prepares Node.js, the locked npm dependencies and Chromium,
-then runs the same recipe as a separate blocking job. Browser tests run outside `just gate`.
+then runs the same recipe as a separate blocking job. This flow runs outside `just gate`; the
+chromedp tests of `just browser` run inside it.
 
 ### Secret scan
 
