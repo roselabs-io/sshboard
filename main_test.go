@@ -327,8 +327,7 @@ func TestRenewCert(t *testing.T) {
 	}
 }
 
-// TestCertsFilter covers the key_id and status filters of GET /certs over a log
-// holding one cert per status.
+// The fixture includes a NEVER certificate, which is visible under ALL.
 func TestCertsFilter(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Now().UTC()
