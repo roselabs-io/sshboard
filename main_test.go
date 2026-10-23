@@ -2,12 +2,14 @@ package main
 
 import (
 	"fmt"
+	"html"
 	"html/template"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -327,8 +329,7 @@ func TestRenewCert(t *testing.T) {
 	}
 }
 
-// TestCertsFilter covers the key_id and status filters of GET /certs over a log
-// holding one cert per status.
+// The fixture includes a NEVER certificate, which is visible under ALL.
 func TestCertsFilter(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Now().UTC()
@@ -360,6 +361,7 @@ func TestCertsFilter(t *testing.T) {
 		{"?q=alice", 200, []string{"alice-active", "Alice-expiring"}},
 		{"?q=BOB&status=EXPIRED", 200, []string{"bob-expired"}},
 		{"?q=bob&status=ACTIVE", 200, nil},
+		{"?q=" + url.QueryEscape(`a & "b"+c`) + "&status=EXPIRING", 200, nil},
 		{"?status=NEVER", 400, nil},
 	}
 	for _, c := range cases {
@@ -380,6 +382,47 @@ func TestCertsFilter(t *testing.T) {
 			}
 			if wantCount := fmt.Sprintf("%d of 4 cert(s)", len(c.want)); !strings.Contains(body, wantCount) {
 				t.Errorf("body lacks %q", wantCount)
+			}
+			params, err := url.ParseQuery(strings.TrimPrefix(c.query, "?"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			q, status := params.Get("q"), params.Get("status")
+			if status == "" {
+				status = "ALL"
+			}
+			_, form, found := strings.Cut(body, `<form method="get" action="/t/tok/certs"`)
+			if !found {
+				t.Fatal("missing search form")
+			}
+			form, _, found = strings.Cut(form, "</form>")
+			if !found {
+				t.Fatal("missing search form closing tag")
+			}
+			for _, input := range []string{
+				`<input type="search" name="q" value="` + q + `"`,
+				`<input type="hidden" name="status" value="` + status + `"`,
+			} {
+				if !strings.Contains(html.UnescapeString(form), input) {
+					t.Errorf("search form lacks %q", input)
+				}
+			}
+			buttons := regexp.MustCompile(`<a role="button" href="([^"]*)"([^>]*)>(ALL|ACTIVE|EXPIRING|EXPIRED)</a>`).FindAllStringSubmatch(body, -1)
+			if len(buttons) != 4 {
+				t.Fatalf("status buttons = %d, want 4", len(buttons))
+			}
+			for i, target := range []string{"ALL", "ACTIVE", "EXPIRING", "EXPIRED"} {
+				button := buttons[i]
+				link, err := url.Parse(html.UnescapeString(button[1]))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if button[3] != target || link.Path != "/t/tok/certs" || link.Query().Get("status") != target || link.Query().Get("q") != q {
+					t.Errorf("%s status button = %q, want certs link preserving q=%q", target, button[0], q)
+				}
+				if current := strings.Contains(button[2], `aria-current="true"`); current != (target == status) {
+					t.Errorf("%s aria-current = %v, selected status = %s", target, current, status)
+				}
 			}
 		})
 	}
