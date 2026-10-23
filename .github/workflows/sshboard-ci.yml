@@ -139,3 +139,33 @@ jobs:
 
       - name: Gate
         run: just gate
+
+  browser:
+    needs: validate
+    name: Browser flow
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: ${{ inputs.expected_head_sha == '' && 1 || 0 }}
+
+      - name: "Merge conflict check: PR head into main"
+        if: inputs.expected_head_sha != ''
+        env:
+          HEAD_SHA: ${{ inputs.expected_head_sha }}
+        run: |
+          git fetch --no-tags origin "$HEAD_SHA"
+          git -c user.name=sshboard-ci -c user.email=sshboard-ci@users.noreply.github.com merge --no-ff --no-edit "$HEAD_SHA"
+
+      - uses: extractions/setup-just@v4
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: just browser-test

@@ -2,16 +2,16 @@ name: Audit
 
 # `just audit`: govulncheck over the Go module dependencies and the standard library of the Go version
 # of `go.mod`. It needs the network (the module proxy and vuln.go.dev), so it runs here and not in the
-# gate: on a PR or a push to `main` that changes `go.mod` or `go.sum`, and weekly on `main`. A finding
-# fails the job.
+# gate. npm audit checks the browser runner's lockfile. Runs on dependency changes and weekly on
+# main; a finding fails the job.
 
 on:
   pull_request:
     branches: [main]
-    paths: [go.mod, go.sum]
+    paths: [go.mod, go.sum, package.json, package-lock.json]
   push:
     branches: [main]
-    paths: [go.mod, go.sum]
+    paths: [go.mod, go.sum, package.json, package-lock.json]
   schedule:
     - cron: '0 6 * * 1'
 
@@ -32,6 +32,10 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
 
       - name: Audit
         run: just audit
