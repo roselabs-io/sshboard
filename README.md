@@ -281,6 +281,20 @@ This removes the endpoint from endpoints.yaml. It does not revoke the
 endpoint's tunnel certificate; that certificate stays valid until it expires or
 is revoked from the Certs view.
 
+## Releases
+
+A merge into `main` that adds a version heading to [CHANGELOG.md](CHANGELOG.md)
+releases that version. To make a release, the PR renames `## [Unreleased]` to
+`## [X.Y.Z] — YYYY-MM-DD` and adds a new `## [Unreleased]` above it.
+
+After the gate (`sshboard CI`) passes on the push to `main`, CI creates the tag
+`vX.Y.Z` on the merged commit when it does not exist, builds the six targets,
+creates the GitHub Release and sends a `formula-update` event to
+`roselabs-io/homebrew-tools` for `Formula/sshboard.rb`. A merge that adds no
+version heading releases nothing. CI does not create prerelease tags
+(`X.Y.Z-<suffix>`). The workflows are described in [AGENTS.md](AGENTS.md),
+"Releases".
+
 ## Stability promises
 
 Pre-1.0: minor releases may break things. Breaking changes will be called out in [CHANGELOG.md](CHANGELOG.md) with the rationale.

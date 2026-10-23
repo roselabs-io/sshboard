@@ -1,4 +1,7 @@
-# Release — triggered by pushing a tag matching v*.
+# Release — triggered by pushing a tag matching v*, or called by
+# release-on-merge.yml with the tag it created as the input `tag`.
+# Under workflow_call github.ref_name is the caller's branch, so the
+# jobs read the tag from TAG: the input, else github.ref_name.
 #
 # Builds the 6-platform release matrix, packages each as a
 # .tar.gz (Unix) or .zip (Windows), generates a sha256 checksums
@@ -6,7 +9,7 @@
 # auto-generated release notes.
 #
 # For a tag that is not a prerelease, the homebrew job then sends a
-# repository_dispatch event (type `release`, payload `tool`, `tag`)
+# repository_dispatch event (type `formula-update`, payload `tool`, `tag`)
 # to roselabs-io/homebrew-tools, whose workflow updates
 # Formula/sshboard.rb. GITHUB_TOKEN cannot reach another repository,
 # so the dispatch uses the secret HOMEBREW_TAP_TOKEN, a token that can
@@ -17,9 +20,18 @@ name: Release
 on:
   push:
     tags: ['v*']
+  workflow_call:
+    inputs:
+      tag:
+        description: The tag to release, vX.Y.Z
+        required: true
+        type: string
 
 permissions:
   contents: write
+
+env:
+  TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
   build:
@@ -37,6 +49,8 @@ jobs:
           - { goos: windows, goarch: arm64, ext: .exe }
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
 
       - uses: actions/setup-go@v5
         with:
@@ -51,14 +65,14 @@ jobs:
         run: |
           mkdir -p dist
           go build \
-            -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}" \
+            -ldflags "-s -w -X main.version=${TAG}" \
             -trimpath \
             -o dist/sshboard${{ matrix.ext }} .
 
       - name: Package
         run: |
           cd dist
-          archive_base="sshboard-${GITHUB_REF_NAME}-${{ matrix.goos }}-${{ matrix.goarch }}"
+          archive_base="sshboard-${TAG}-${{ matrix.goos }}-${{ matrix.goarch }}"
           if [ "${{ matrix.goos }}" = "windows" ]; then
             zip "../${archive_base}.zip" sshboard.exe
           else
@@ -77,6 +91,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
 
       - uses: actions/download-artifact@v4
         with:
@@ -91,6 +107,7 @@ jobs:
 
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.TAG }}
           files: |
             dist/sshboard-*-*.tar.gz
             dist/sshboard-*-*.zip
@@ -98,13 +115,13 @@ jobs:
           generate_release_notes: true
           fail_on_unmatched_files: true
           draft: false
-          prerelease: ${{ contains(github.ref_name, '-') }}
+          prerelease: ${{ contains(env.TAG, '-') }}
 
   homebrew:
     name: Notify the Homebrew tap
     needs: release
     # A prerelease tag (one containing '-') does not update the formula.
-    if: ${{ !contains(github.ref_name, '-') }}
+    if: ${{ !contains(inputs.tag || github.ref_name, '-') }}
     runs-on: ubuntu-latest
     steps:
       - name: Send repository_dispatch to roselabs-io/homebrew-tools
@@ -112,6 +129,6 @@ jobs:
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
           gh api repos/roselabs-io/homebrew-tools/dispatches \
-            -f event_type=release \
+            -f event_type=formula-update \
             -f 'client_payload[tool]=sshboard' \
-            -f "client_payload[tag]=${GITHUB_REF_NAME}"
+            -f "client_payload[tag]=${TAG}"

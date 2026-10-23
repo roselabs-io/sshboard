@@ -20,7 +20,8 @@ Templates and static assets are embedded with `go:embed`; there is no JavaScript
 | `static/` | `app.css` and the vendored `htmx.min.js` and `pico.min.css`, embedded |
 | `README.md`, `CHANGELOG.md`, `CLAUDE.md` | usage, release notes, contributor notes |
 | `.github/workflows/ci.yml` | `go vet` and `go build` for six targets, `go test` on linux/amd64 |
-| `.github/workflows/release.yml` | on a `v*` tag: builds six targets, archives, `checksums.txt`, a GitHub Release, then notifies `roselabs-io/homebrew-tools` |
+| `.github/workflows/release.yml` | on a `v*` tag, or called by `release-on-merge.yml` with a tag: builds six targets, archives, `checksums.txt`, a GitHub Release, then notifies `roselabs-io/homebrew-tools` |
+| `.github/workflows/release-on-merge.yml` | after `sshboard CI` succeeds on a push to `main`: tags the newest version heading of `CHANGELOG.md` when its tag does not exist, and calls `release.yml` |
 | `.github/workflows/sshboard-ci.yml` | `validate` (PR metadata), `gate` (`just gate`) and `browser` (`just browser-test`) |
 | `.github/workflows/sshboard-pm.yml` | the issue and board sync of Governor |
 | `.github/workflows/audit.yml` | `just audit` on a change to Go or npm dependency files, and weekly on `main` |
@@ -28,12 +29,32 @@ Templates and static assets are embedded with `go:embed`; there is no JavaScript
 | `pipeline.yaml` | the Governor dispatcher's config for this repository |
 | Governor's package preflight (`tools/local_preflight.py` of the Governor package, run by the dispatcher; this repository keeps no copy) | the local check the dispatcher runs: `just check`, then `just gate` |
 
-No key or token is tracked. A merge into `main` deploys nothing; a `v*` tag creates a GitHub
-Release; for a tag without `-`, the `homebrew` job of `release.yml` then sends a `release`
-`repository_dispatch` event (`tool`, `tag`) to `roselabs-io/homebrew-tools`, authenticated with the
-secret `HOMEBREW_TAP_TOKEN`, for a workflow there to update `Formula/sshboard.rb`. The
-binary also runs as `sshboard.service` on the box; how it is installed and updated there is not
-recorded in this repository.
+No key or token is tracked. The binary also runs as `sshboard.service` on the box; how it is
+installed and updated there is not recorded in this repository.
+
+## Releases
+
+A release is made by a merge into `main` that adds a version heading to `CHANGELOG.md`: the PR
+renames `## [Unreleased]` to `## [X.Y.Z] — YYYY-MM-DD` (or adds that heading) and starts a new
+empty `## [Unreleased]` above it. A merge that adds no version heading releases nothing.
+
+1. `sshboard CI` runs on the push to `main`. When its run succeeds, `release-on-merge.yml` starts
+   (`workflow_run`); a failed or cancelled run, and a dispatched exact-head run, start no release.
+2. Its `tag` job reads the first heading of the form `## [X.Y.Z]` at the pushed commit;
+   `[Unreleased]` and headings with a prerelease suffix (`[0.0.1-dev]`) do not match. When the tag
+   `vX.Y.Z` does not exist on `origin`, it creates the tag on the pushed commit and pushes it with
+   `GITHUB_TOKEN`.
+3. Its `release` job calls `release.yml` (`workflow_call`) with the tag. A tag pushed with
+   `GITHUB_TOKEN` starts no workflow, so the `push: tags` trigger of `release.yml` does not also run.
+4. `release.yml` builds the six targets at the tag and creates the GitHub Release. For a tag without
+   `-`, its `homebrew` job sends a `formula-update` `repository_dispatch` event (`tool`, `tag`) to
+   `roselabs-io/homebrew-tools`, authenticated with the organization secret `HOMEBREW_TAP_TOKEN`.
+   The workflow there opens a PR that updates `Formula/sshboard.rb`.
+
+Pushing a `v*` tag by hand still runs `release.yml` directly; CI creates no prerelease tag. When a
+CI run of the merge is cancelled or fails, the next push to `main` whose run succeeds finds the tag
+missing and releases from its own commit. A bad release is not deleted: revert on `main` and merge a
+new patch heading.
 
 ## Commands
 
@@ -72,7 +93,8 @@ chromedp tests of `just browser` run inside it.
 except `.secrets.baseline`. `--no-verify` disables the plugins' network verification. A finding is
 its file, detector type and hash; the recipe exits 1 and prints each finding of the scan that
 `.secrets.baseline` does not list. Line numbers are not compared, so moving a baselined line does not
-fail the scan. `.secrets.baseline` currently lists no finding.
+fail the scan. `.secrets.baseline` lists one finding, a Secret Keyword match on the line
+`secrets: inherit` of `release-on-merge.yml`.
 
 After confirming that a new finding is not a secret, regenerate the baseline:
 
