@@ -2,12 +2,12 @@
 
 # Static checks: vet and formatting.
 check:
-    go vet ./...
+    go vet -p "${GOVERNOR_JOBS:-1}" ./...
     test -z "$(gofmt -l .)"
 
 # The test suite.
 test:
-    go test ./...
+    go test -p "${GOVERNOR_JOBS:-1}" ./...
 
 # `go build` with CGO_ENABLED=0 for the six release targets of `release.yml` (the build matrix of `ci.yml`).
 # The binaries are written to a temporary directory and removed.
@@ -18,7 +18,7 @@ build:
     trap 'rm -rf "$out"' EXIT
     for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
         echo "go build $target"
-        CGO_ENABLED=0 GOOS="${target%/*}" GOARCH="${target#*/}" go build -o "$out/sshboard-${target%/*}-${target#*/}" .
+        CGO_ENABLED=0 GOOS="${target%/*}" GOARCH="${target#*/}" go build -p "${GOVERNOR_JOBS:-1}" -o "$out/sshboard-${target%/*}-${target#*/}" .
     done
 
 # Secret scan of the tracked files with detect-secrets 1.5.0, pinned through uvx; `--no-verify` makes no network
@@ -37,7 +37,7 @@ scan:
 # Vulnerability check of the Go module dependencies with govulncheck, pinned outside go.mod. Needs the network,
 # so it is not part of the gate; CI runs it in `audit.yml`.
 audit:
-    go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+    go run -p "${GOVERNOR_JOBS:-1}" golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
 
 # The deterministic gate CI runs.
 gate: check scan test build
