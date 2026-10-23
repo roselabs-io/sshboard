@@ -47,8 +47,8 @@ empty `## [Unreleased]` above it. A merge that adds no version heading releases 
    `GITHUB_TOKEN` starts no workflow, so the `push: tags` trigger of `release.yml` does not also run.
 4. `release.yml` builds the six targets at the tag and creates the GitHub Release. For a tag without
    `-`, its `homebrew` job sends a `formula-update` `repository_dispatch` event (`tool`, `tag`) to
-   `roselabs-io/homebrew-tools`, authenticated with the organization secret `HOMEBREW_TAP_TOKEN`;
-   the workflow there opens a PR that updates `Formula/sshboard.rb`.
+   `roselabs-io/homebrew-tools`, authenticated with the organization secret `HOMEBREW_TAP_TOKEN`.
+   The workflow there opens a PR that updates `Formula/sshboard.rb`.
 
 Pushing a `v*` tag by hand still runs `release.yml` directly; CI creates no prerelease tag. When a
 CI run of the merge is cancelled or fails, the next push to `main` whose run succeeds finds the tag
@@ -79,7 +79,8 @@ and `go run` downloads govulncheck on their first run.
 except `.secrets.baseline`. `--no-verify` disables the plugins' network verification. A finding is
 its file, detector type and hash; the recipe exits 1 and prints each finding of the scan that
 `.secrets.baseline` does not list. Line numbers are not compared, so moving a baselined line does not
-fail the scan. `.secrets.baseline` currently lists no finding.
+fail the scan. `.secrets.baseline` lists one finding, a Secret Keyword match on the line
+`secrets: inherit` of `release-on-merge.yml`.
 
 After confirming that a new finding is not a secret, regenerate the baseline:
 
