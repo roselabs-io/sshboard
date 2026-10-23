@@ -21,8 +21,26 @@ build:
         CGO_ENABLED=0 GOOS="${target%/*}" GOARCH="${target#*/}" go build -o "$out/sshboard-${target%/*}-${target#*/}" .
     done
 
+# Secret scan of the tracked files with detect-secrets 1.5.0, pinned through uvx; `--no-verify` makes no network
+# call. Fails on a finding whose file, type and hash are not in `.secrets.baseline`; line numbers are not compared.
+scan:
+    #!/usr/bin/env -S uvx --from detect-secrets==1.5.0 python
+    import json, subprocess, sys
+    def findings(report):
+        return {(f["filename"], f["type"], f["hashed_secret"]) for found in report["results"].values() for f in found}
+    scan = subprocess.run([sys.executable, "-m", "detect_secrets", "scan", "--no-verify", "--exclude-files", r"^\.secrets\.baseline$"], check=True, capture_output=True, text=True).stdout
+    new = sorted(findings(json.loads(scan)) - findings(json.load(open(".secrets.baseline", encoding="utf-8"))))
+    for filename, kind, digest in new:
+        print(f"{filename}: {kind} {digest} is not in .secrets.baseline", file=sys.stderr)
+    sys.exit(1 if new else 0)
+
+# Vulnerability check of the Go module dependencies with govulncheck, pinned outside go.mod. Needs the network,
+# so it is not part of the gate; CI runs it in `audit.yml`.
+audit:
+    go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+
 # The deterministic gate CI runs.
-gate: check test build
+gate: check scan test build
 
 # Apply the formatter.
 fix:
