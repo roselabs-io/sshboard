@@ -40,9 +40,10 @@ scan:
     sys.exit(1 if new else 0)
 
 # Vulnerability check of the Go module dependencies with govulncheck, pinned outside go.mod. Needs the network,
-# so it is not part of the gate; CI runs it in `audit.yml`.
+# so it is not part of the gate; CI runs it in `audit.yml`. v1.7.0 is the last release that builds with the Go version
+# of `go.mod` (1.25); v1.8.0 and later require Go 1.26.
 audit:
-    go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+    go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./...
 
 # The deterministic gate CI runs.
 gate: check scan test browser build
