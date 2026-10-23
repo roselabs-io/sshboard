@@ -23,7 +23,7 @@ Templates and static assets are embedded with `go:embed`; there is no JavaScript
 | `.github/workflows/release.yml` | on a `v*` tag: builds six targets, archives, `checksums.txt`, a GitHub Release, then notifies `roselabs-io/homebrew-tools` |
 | `.github/workflows/sshboard-ci.yml` | `validate` (PR metadata) and `gate` (`just gate`) |
 | `.github/workflows/sshboard-pm.yml` | the issue and board sync of Governor |
-| `.github/workflows/audit.yml` | `just audit` on a change to `go.mod` or `go.sum`, and weekly on `main` |
+| `.github/workflows/audit.yml` | `just audit` on a change to Go or npm dependency files, and weekly on `main` |
 | `.secrets.baseline` | the detect-secrets findings that are not secrets, read by `just scan` |
 | `pipeline.yaml` | the Governor dispatcher's config for this repository |
 | Governor's package preflight (`tools/local_preflight.py` of the Governor package, run by the dispatcher; this repository keeps no copy) | the local check the dispatcher runs: `just check`, then `just gate` |
@@ -44,7 +44,7 @@ recorded in this repository.
 | `just browser-test` | Playwright Chromium flow in `tests/browser/`; requires Node.js 24, `npm ci` and `npx playwright install chromium` (`--with-deps` on Linux) |
 | `just build` | `go build` with `CGO_ENABLED=0` for linux, darwin and windows on amd64 and arm64, into a temporary directory |
 | `just scan` | `detect-secrets scan --no-verify` (detect-secrets 1.5.0, through `uvx`) of the tracked files; fails on a finding not in `.secrets.baseline` |
-| `just audit` | `govulncheck ./...` (govulncheck v1.9.0, through `go run`); needs the network and is not part of the gate |
+| `just audit` | `govulncheck ./...` (govulncheck v1.9.0, through `go run`), then `npm audit --package-lock-only`; needs Node.js 24 and the network and is not part of the gate |
 | `just gate` | `check`, `scan`, `test`, `build`; the deterministic gate CI runs |
 | `just fix` | `gofmt -w .` |
 | `just ff` | switches to `main` and fast-forwards it from `origin`; refuses local changes or a diverged `main` |
@@ -92,6 +92,10 @@ database (vuln.go.dev) whose vulnerable symbols the code reaches, in the require
 standard library of the Go toolchain that runs it, and exits non-zero when it finds one. Locally that
 toolchain is the installed `go`; in `audit.yml` it is the version of `go.mod`. A finding is triaged
 like a review finding: a fix, or a recorded disposition with its follow-up issue.
+
+The recipe then runs `npm audit --package-lock-only` against the locked browser-test dependencies.
+It reads the lockfile without installing packages and exits non-zero on an advisory. CI runs both
+audits on changes to `go.mod`, `go.sum`, `package.json` or `package-lock.json`, and weekly on `main`.
 
 ## CI
 
