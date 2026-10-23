@@ -15,14 +15,15 @@ Templates and static assets are embedded with `go:embed`; there is no JavaScript
 |---|---|
 | `main.go` | the whole implementation; `version` is a `var` set with `-ldflags "-X main.version=<tag>"` at release |
 | `main_test.go` | the tests (`go test ./...`) |
+| `tests/browser/`, `playwright.config.js`, `package.json`, `package-lock.json` | the Chromium test and its pinned Playwright runner; no application JavaScript build |
 | `templates/*.html.tmpl` | the server-rendered views, embedded |
 | `static/` | `app.css` and the vendored `htmx.min.js` and `pico.min.css`, embedded |
 | `README.md`, `CHANGELOG.md`, `CLAUDE.md` | usage, release notes, contributor notes |
 | `.github/workflows/ci.yml` | `go vet` and `go build` for six targets, `go test` on linux/amd64 |
 | `.github/workflows/release.yml` | on a `v*` tag: builds six targets, archives, `checksums.txt`, a GitHub Release, then notifies `roselabs-io/homebrew-tools` |
-| `.github/workflows/sshboard-ci.yml` | `validate` (PR metadata) and `gate` (`just gate`) |
+| `.github/workflows/sshboard-ci.yml` | `validate` (PR metadata), `gate` (`just gate`) and `browser` (`just browser-test`) |
 | `.github/workflows/sshboard-pm.yml` | the issue and board sync of Governor |
-| `.github/workflows/audit.yml` | `just audit` on a change to `go.mod` or `go.sum`, and weekly on `main` |
+| `.github/workflows/audit.yml` | `just audit` on a change to Go or npm dependency files, and weekly on `main` |
 | `.secrets.baseline` | the detect-secrets findings that are not secrets, read by `just scan` |
 | `pipeline.yaml` | the Governor dispatcher's config for this repository |
 | Governor's package preflight (`tools/local_preflight.py` of the Governor package, run by the dispatcher; this repository keeps no copy) | the local check the dispatcher runs: `just check`, then `just gate` |
@@ -40,10 +41,11 @@ recorded in this repository.
 |---|---|
 | `just check` | `go vet ./...`; fails when `gofmt -l .` lists a file |
 | `just test` | `go test ./...` |
+| `just browser-test` | Playwright Chromium flow in `tests/browser/`; requires Node.js 24, `npm ci` and `npx playwright install chromium` (`--with-deps` on Linux) |
 | `just browser` | `go test -tags browser -run TestBrowser ./...`: browser tests (chromedp) in headless Chrome or Chromium; a test skips when neither is installed |
 | `just build` | `go build` with `CGO_ENABLED=0` for linux, darwin and windows on amd64 and arm64, into a temporary directory |
 | `just scan` | `detect-secrets scan --no-verify` (detect-secrets 1.5.0, through `uvx`) of the tracked files; fails on a finding not in `.secrets.baseline` |
-| `just audit` | `govulncheck ./...` (govulncheck v1.7.0, the last release that builds with Go 1.25, through `go run`); needs the network and is not part of the gate |
+| `just audit` | `govulncheck ./...` (govulncheck v1.7.0, the last release that builds with Go 1.25, through `go run`), then `npm audit --package-lock-only`; needs Node.js 24 and the network and is not part of the gate |
 | `just gate` | `check`, `scan`, `test`, `browser`, `build`; the deterministic gate CI runs |
 | `just fix` | `gofmt -w .` |
 | `just ff` | switches to `main` and fast-forwards it from `origin`; refuses local changes or a diverged `main` |
@@ -51,6 +53,18 @@ recorded in this repository.
 `up`, `down` and `logs` are not applicable (`checks.recipes.not_applicable` of `pipeline.yaml`):
 there is no local stack. `just`, Go and uv (for `uvx`) are required. `uvx` downloads detect-secrets
 and `go run` downloads govulncheck on their first run.
+
+### Browser test
+
+`just browser-test` builds sshboard in a temporary directory and starts it on loopback with a
+synthetic issuance log and an `sshca` stub. Chromium loads the embedded assets and exercises Inspect
+through HTMX, verifies the selected certificate output, closes the dialog and reopens it. The test
+stops its server and removes its temporary files before returning. It needs no installed sshca,
+bastionhub, CA keys or external service. It currently runs on macOS and Linux.
+
+The `browser` job of `sshboard-ci.yml` prepares Node.js, the locked npm dependencies and Chromium,
+then runs the same recipe as a separate blocking job. This flow runs outside `just gate`; the
+chromedp tests of `just browser` run inside it.
 
 ### Secret scan
 
@@ -80,6 +94,10 @@ database (vuln.go.dev) whose vulnerable symbols the code reaches, in the require
 standard library of the Go toolchain that runs it, and exits non-zero when it finds one. Locally that
 toolchain is the installed `go`; in `audit.yml` it is the version of `go.mod`. A finding is triaged
 like a review finding: a fix, or a recorded disposition with its follow-up issue.
+
+The recipe then runs `npm audit --package-lock-only` against the locked browser-test dependencies.
+It reads the lockfile without installing packages and exits non-zero on an advisory. CI runs both
+audits on changes to `go.mod`, `go.sum`, `package.json` or `package-lock.json`, and weekly on `main`.
 
 ## CI
 
