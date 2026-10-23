@@ -9,6 +9,10 @@ check:
 test:
     go test ./...
 
+# Browser flow; requires npm ci and npx playwright install chromium.
+browser-test:
+    npm run test:browser
+
 # `go build` with CGO_ENABLED=0 for the six release targets of `release.yml` (the build matrix of `ci.yml`).
 # The binaries are written to a temporary directory and removed.
 build:

@@ -15,6 +15,7 @@ Templates and static assets are embedded with `go:embed`; there is no JavaScript
 |---|---|
 | `main.go` | the whole implementation; `version` is a `var` set with `-ldflags "-X main.version=<tag>"` at release |
 | `main_test.go` | the tests (`go test ./...`) |
+| `tests/browser/`, `playwright.config.js`, `package.json`, `package-lock.json` | the Chromium test and its pinned Playwright runner; no application JavaScript build |
 | `templates/*.html.tmpl` | the server-rendered views, embedded |
 | `static/` | `app.css` and the vendored `htmx.min.js` and `pico.min.css`, embedded |
 | `README.md`, `CHANGELOG.md`, `CLAUDE.md` | usage, release notes, contributor notes |
@@ -40,6 +41,7 @@ recorded in this repository.
 |---|---|
 | `just check` | `go vet ./...`; fails when `gofmt -l .` lists a file |
 | `just test` | `go test ./...` |
+| `just browser-test` | Playwright Chromium flow in `tests/browser/`; requires Node.js 24, `npm ci` and `npx playwright install chromium` (`--with-deps` on Linux) |
 | `just build` | `go build` with `CGO_ENABLED=0` for linux, darwin and windows on amd64 and arm64, into a temporary directory |
 | `just scan` | `detect-secrets scan --no-verify` (detect-secrets 1.5.0, through `uvx`) of the tracked files; fails on a finding not in `.secrets.baseline` |
 | `just audit` | `govulncheck ./...` (govulncheck v1.9.0, through `go run`); needs the network and is not part of the gate |
@@ -50,6 +52,17 @@ recorded in this repository.
 `up`, `down` and `logs` are not applicable (`checks.recipes.not_applicable` of `pipeline.yaml`):
 there is no local stack. `just`, Go and uv (for `uvx`) are required. `uvx` downloads detect-secrets
 and `go run` downloads govulncheck on their first run.
+
+### Browser test
+
+`just browser-test` builds sshboard in a temporary directory and starts it on loopback with a
+synthetic issuance log and an `sshca` stub. Chromium loads the embedded assets and exercises Inspect
+through HTMX, verifies the selected certificate output, closes the dialog and reopens it. The test
+stops its server and removes its temporary files before returning. It needs no installed sshca,
+bastionhub, CA keys or external service. It currently runs on macOS and Linux.
+
+The `browser` job of `sshboard-ci.yml` prepares Node.js, the locked npm dependencies and Chromium,
+then runs the same recipe as a separate blocking job. Browser tests run outside `just gate`.
 
 ### Secret scan
 

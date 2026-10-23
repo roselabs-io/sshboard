@@ -5,6 +5,9 @@ sshboard
 *.out
 *.prof
 coverage.*
+node_modules/
+test-results/
+playwright-report/
 
 # IDE
 .vscode/
