@@ -1086,6 +1086,22 @@ func main() {
 	}
 
 	prefix := "/t/" + a.token
+
+	fmt.Println()
+	fmt.Printf("Listening on: http://%s%s/\n", *bind, prefix)
+	fmt.Println()
+	fmt.Println("The token in the path prevents other processes on this host from")
+	fmt.Println("reaching the port. It is not authentication; do not share the URL.")
+	fmt.Println()
+
+	if err := http.ListenAndServe(*bind, a.handler()); err != nil {
+		log.Fatal(err)
+	}
+}
+
+// handler returns the mux serving the token-prefixed views, the API routes and the static assets.
+func (a *app) handler() http.Handler {
+	prefix := "/t/" + a.token
 	mux := http.NewServeMux()
 	mux.HandleFunc(prefix+"/", a.index)
 	mux.HandleFunc(prefix+"/certs", a.certs)
@@ -1110,17 +1126,7 @@ func main() {
 		}
 		http.NotFound(w, r)
 	})
-
-	fmt.Println()
-	fmt.Printf("Listening on: http://%s%s/\n", *bind, prefix)
-	fmt.Println()
-	fmt.Println("The token in the path prevents other processes on this host from")
-	fmt.Println("reaching the port. It is not authentication; do not share the URL.")
-	fmt.Println()
-
-	if err := http.ListenAndServe(*bind, mux); err != nil {
-		log.Fatal(err)
-	}
+	return mux
 }
 
 func isLocalhost(addr string) bool {

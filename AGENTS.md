@@ -40,10 +40,11 @@ recorded in this repository.
 |---|---|
 | `just check` | `go vet ./...`; fails when `gofmt -l .` lists a file |
 | `just test` | `go test ./...` |
+| `just browser` | `go test -tags browser -run TestBrowser ./...`: browser tests (chromedp) in headless Chrome or Chromium; a test skips when neither is installed |
 | `just build` | `go build` with `CGO_ENABLED=0` for linux, darwin and windows on amd64 and arm64, into a temporary directory |
 | `just scan` | `detect-secrets scan --no-verify` (detect-secrets 1.5.0, through `uvx`) of the tracked files; fails on a finding not in `.secrets.baseline` |
 | `just audit` | `govulncheck ./...` (govulncheck v1.9.0, through `go run`); needs the network and is not part of the gate |
-| `just gate` | `check`, `scan`, `test`, `build`; the deterministic gate CI runs |
+| `just gate` | `check`, `scan`, `test`, `browser`, `build`; the deterministic gate CI runs |
 | `just fix` | `gofmt -w .` |
 | `just ff` | switches to `main` and fast-forwards it from `origin`; refuses local changes or a diverged `main` |
 
