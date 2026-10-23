@@ -21,7 +21,7 @@ Templates and static assets are embedded with `go:embed`; there is no JavaScript
 | `README.md`, `CHANGELOG.md`, `CLAUDE.md` | usage, release notes, contributor notes |
 | `.github/workflows/ci.yml` | `go vet` and `go build` for six targets, `go test` on linux/amd64 |
 | `.github/workflows/release.yml` | on a `v*` tag: builds six targets, archives, `checksums.txt`, a GitHub Release, then notifies `roselabs-io/homebrew-tools` |
-| `.github/workflows/sshboard-ci.yml` | `validate` (PR metadata) and `gate` (`just gate`) |
+| `.github/workflows/sshboard-ci.yml` | `validate` (PR metadata), `gate` (`just gate`) and `browser` (`just browser-test`) |
 | `.github/workflows/sshboard-pm.yml` | the issue and board sync of Governor |
 | `.github/workflows/audit.yml` | `just audit` on a change to Go or npm dependency files, and weekly on `main` |
 | `.secrets.baseline` | the detect-secrets findings that are not secrets, read by `just scan` |
