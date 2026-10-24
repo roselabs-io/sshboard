@@ -3,8 +3,58 @@
 Instructions for agent sessions working in this repository. `pipeline.yaml` names this file for
 `docs.agents`, `docs.contract`, `docs.review_posture` and `docs.operating_model`.
 
-[`CLAUDE.md`](CLAUDE.md) holds the scope, the contract surface (CLI flags, URL routes), the
-constraints and the conventions. This file does not repeat them.
+## Overview
+
+A web interface over [sshca](https://github.com/roselabs-io/sshca) and
+[bastionhub](https://github.com/roselabs-io/bastionhub). Go and HTMX, single
+binary. Server-rendered from embedded templates and vendored static assets;
+there is no JavaScript build step.
+
+It reads two files and runs two binaries. It holds no CA keys, opens no SSH
+connections, and has no authentication.
+
+## Scope
+
+Out of scope, deliberately:
+
+- **Certificate authority.** Reads sshca's issuance log; calls
+  `sshca cert revoke` and `sshca cert renew` for actions.
+- **SSH.** Calls `bastionhub ssh` and `bastionhub status`.
+- **Authentication.** The random startup token only prevents other processes on
+  the same host from reaching the port. Network exposure requires an SSH local
+  forward or a reverse proxy in front.
+- **A JavaScript build.** HTMX and Pico are vendored.
+- **Bundling the CLIs.** They are called as subprocesses and detected at
+  startup, which keeps their versions independent of this one.
+
+## Contract surface
+
+Two versioned surfaces, from v1.0:
+
+- **CLI flags** — `--bind`, `--ca-dir`, `--config`.
+- **URL routes** — `/`, `/t/<token>/`, `/t/<token>/certs`, `/t/<token>/log`,
+  `/t/<token>/endpoints`, relevant if scripted against.
+
+The formats it reads are sshca's and bastionhub's contract surfaces, not its
+own; a breaking change there is handled in a coordinated release.
+
+## Constraints worth knowing
+
+- **The default bind is `127.0.0.1:7890`.** The warning printed on a
+  non-loopback bind is intentional.
+- **Each view requires its binary on `PATH`.** With neither present the process
+  exits.
+- **State is read from files; actions shell out.** The issuance log and
+  `endpoints.yaml` are read directly. Mutations and live queries go through the
+  CLIs.
+- **`version` in `main.go` is a `var`, not a `const`**, so release builds can
+  inject the tag with `-ldflags "-X main.version=<tag>"`.
+
+## Conventions
+
+- Filenames: kebab-case.
+- Dates: ISO `YYYY-MM-DD`.
+- No YAML frontmatter in Markdown.
 
 ## Repository
 
@@ -18,7 +68,9 @@ Templates and static assets are embedded with `go:embed`; there is no JavaScript
 | `tests/browser/`, `playwright.config.js`, `package.json`, `package-lock.json` | the Chromium test and its pinned Playwright runner; no application JavaScript build |
 | `templates/*.html.tmpl` | the server-rendered views, embedded |
 | `static/` | `app.css` and the vendored `htmx.min.js` and `pico.min.css`, embedded |
-| `README.md`, `CHANGELOG.md`, `CLAUDE.md` | usage, release notes, contributor notes |
+| `README.md`, `CHANGELOG.md` | usage, release notes |
+| `CLAUDE.md` | the line `@AGENTS.md`, which Claude Code expands to this file |
+| `.gemini/settings.json` | sets Gemini CLI's context file name (`context.fileName`) to `AGENTS.md` |
 | `.github/workflows/ci.yml` | `go vet` and `go build` for six targets, `go test` on linux/amd64 |
 | `.github/workflows/release.yml` | on a `v*` tag, or called by `release-on-merge.yml` with a tag: builds six targets, archives, `checksums.txt`, a GitHub Release, then notifies `roselabs-io/homebrew-tools` |
 | `.github/workflows/release-on-merge.yml` | after `sshboard CI` succeeds on a push to `main`: tags the newest version heading of `CHANGELOG.md` when its tag does not exist, and calls `release.yml` |
@@ -136,7 +188,7 @@ checks both. `sshboard-pm.yml` moves issue N on the board from that line. `auton
 approved PR merges through the merge queue, except the PR of a complex or exceptional ticket, whose
 merge is left to a person.
 
-A change to the CLI flags or the URL routes is a contract change (`CLAUDE.md`, Contract surface)
+A change to the CLI flags or the URL routes is a contract change (Contract surface)
 and is recorded in `CHANGELOG.md`.
 
 ## Finding triage
