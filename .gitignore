@@ -6,8 +6,7 @@ sshboard
 *.prof
 coverage.*
 node_modules/
-test-results/
-playwright-report/
+.data/
 
 # IDE
 .vscode/
