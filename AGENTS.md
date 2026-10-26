@@ -32,8 +32,8 @@ Out of scope, deliberately:
 Two versioned surfaces, from v1.0:
 
 - **CLI flags** — `--bind`, `--ca-dir`, `--config`.
-- **URL routes** — `/`, `/t/<token>/`, `/t/<token>/certs`, `/t/<token>/log`,
-  `/t/<token>/endpoints`, relevant if scripted against.
+- **URL routes** — `/`, `/health`, `/t/<token>/`, `/t/<token>/certs`, `/t/<token>/log`,
+  `/t/<token>/endpoints`, `/t/<token>/health`, `/t/<token>/metrics`, relevant if scripted against.
 
 The formats it reads are sshca's and bastionhub's contract surfaces, not its
 own; a breaking change there is handled in a coordinated release.

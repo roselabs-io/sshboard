@@ -16,8 +16,10 @@ import (
 	"flag"
 	"fmt"
 	"html/template"
+	"io"
 	"io/fs"
 	"log"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
@@ -27,6 +29,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -1099,34 +1102,128 @@ func main() {
 	}
 }
 
-// handler returns the mux serving the token-prefixed views, the API routes and the static assets.
+// handler returns the mux serving the token-prefixed views, the API routes, the
+// health and metrics routes and the static assets, counting each request by
+// route and status.
 func (a *app) handler() http.Handler {
 	prefix := "/t/" + a.token
 	mux := http.NewServeMux()
-	mux.HandleFunc(prefix+"/", a.index)
-	mux.HandleFunc(prefix+"/certs", a.certs)
-	mux.HandleFunc(prefix+"/log", a.issuanceLog)
-	mux.HandleFunc(prefix+"/endpoints", a.endpoints)
-	mux.HandleFunc(prefix+"/api/cert/revoke", a.revokeCert)
-	mux.HandleFunc(prefix+"/api/cert/renew", a.renewCert)
-	mux.HandleFunc(prefix+"/api/cert/inspect", a.inspectCert)
-	mux.HandleFunc(prefix+"/api/endpoint/enroll", a.enrollEndpoint)
-	mux.HandleFunc(prefix+"/api/endpoint/unregister", a.unregisterEndpoint)
+	// routes maps each registered pattern to its metrics label, in which the
+	// token is replaced by {token}.
+	routes := map[string]string{}
+	handle := func(pattern string, h http.Handler) {
+		mux.Handle(pattern, h)
+		path := strings.TrimPrefix(pattern, "GET ")
+		if rest, ok := strings.CutPrefix(path, prefix); ok {
+			path = "/t/{token}" + rest
+		}
+		routes[pattern] = path
+	}
+	handleFunc := func(pattern string, h http.HandlerFunc) { handle(pattern, h) }
+
+	handleFunc(prefix+"/", a.index)
+	handleFunc(prefix+"/certs", a.certs)
+	handleFunc(prefix+"/log", a.issuanceLog)
+	handleFunc(prefix+"/endpoints", a.endpoints)
+	handleFunc(prefix+"/api/cert/revoke", a.revokeCert)
+	handleFunc(prefix+"/api/cert/renew", a.renewCert)
+	handleFunc(prefix+"/api/cert/inspect", a.inspectCert)
+	handleFunc(prefix+"/api/endpoint/enroll", a.enrollEndpoint)
+	handleFunc(prefix+"/api/endpoint/unregister", a.unregisterEndpoint)
+
+	// A GET pattern also matches HEAD.
+	handleFunc("GET /health", health)
+	handleFunc("GET "+prefix+"/health", health)
+	counts := &requestCounts{counts: map[requestKey]uint64{}}
+	handleFunc("GET "+prefix+"/metrics", counts.serve)
 
 	staticSub, err := fs.Sub(staticFS, "static")
 	if err != nil {
 		log.Fatal("static fs sub: ", err)
 	}
-	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticSub))))
+	handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticSub))))
 
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	handleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/" {
 			http.Redirect(w, r, prefix+"/", http.StatusFound)
 			return
 		}
 		http.NotFound(w, r)
 	})
-	return mux
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
+		mux.ServeHTTP(sw, r)
+		// ServeMux sets r.Pattern to the matched pattern, also on the redirect
+		// it issues for an uncleaned path or a missing trailing slash: the
+		// pattern of the redirect's target.
+		counts.add(requestKey{route: routes[r.Pattern], status: sw.status})
+	})
+}
+
+// -----------------------------------------------------------------------------
+// Health and metrics
+// -----------------------------------------------------------------------------
+
+// health answers {"status": "ok"}. For a HEAD request net/http sends the
+// status and headers of the GET response and discards the body.
+func health(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	fmt.Fprintln(w, `{"status": "ok"}`)
+}
+
+// statusWriter records the status code a handler writes.
+type statusWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (s *statusWriter) WriteHeader(code int) {
+	s.status = code
+	s.ResponseWriter.WriteHeader(code)
+}
+
+type requestKey struct {
+	route  string
+	status int
+}
+
+// requestCounts holds the number of requests served per route label and
+// status code since the process started. Route labels come from the registered
+// patterns only, so the request path, the token and the client address are not
+// recorded.
+type requestCounts struct {
+	mu     sync.Mutex
+	counts map[requestKey]uint64
+}
+
+func (c *requestCounts) add(k requestKey) {
+	c.mu.Lock()
+	c.counts[k]++
+	c.mu.Unlock()
+}
+
+// serve writes the counts in the Prometheus text exposition format 0.0.4,
+// sorted by route and status.
+func (c *requestCounts) serve(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	c.mu.Lock()
+	snapshot := maps.Clone(c.counts)
+	c.mu.Unlock()
+	keys := slices.Collect(maps.Keys(snapshot))
+	slices.SortFunc(keys, func(a, b requestKey) int {
+		if n := strings.Compare(a.route, b.route); n != 0 {
+			return n
+		}
+		return a.status - b.status
+	})
+	var b strings.Builder
+	b.WriteString("# HELP sshboard_http_requests_total HTTP requests served, by route and status code.\n")
+	b.WriteString("# TYPE sshboard_http_requests_total counter\n")
+	for _, k := range keys {
+		fmt.Fprintf(&b, "sshboard_http_requests_total{route=%q,code=\"%d\"} %d\n", k.route, k.status, snapshot[k])
+	}
+	io.WriteString(w, b.String())
 }
 
 func isLocalhost(addr string) bool {

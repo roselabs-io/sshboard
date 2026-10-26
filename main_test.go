@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"html"
 	"html/template"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -771,4 +772,105 @@ func TestIssuanceLog(t *testing.T) {
 			}
 		})
 	}
+}
+
+// request sends method to srv's path through a real connection, so a HEAD
+// response is read as a client receives it.
+func request(t *testing.T, srv *httptest.Server, method, path string) (*http.Response, string) {
+	t.Helper()
+	req, err := http.NewRequest(method, srv.URL+path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resp, string(body)
+}
+
+func TestHealth(t *testing.T) {
+	srv := httptest.NewServer((&app{token: "tok"}).handler())
+	defer srv.Close()
+	for _, path := range []string{"/health", "/t/tok/health"} {
+		for _, c := range []struct{ method, body string }{
+			{http.MethodGet, `{"status": "ok"}` + "\n"},
+			{http.MethodHead, ""},
+		} {
+			t.Run(c.method+" "+path, func(t *testing.T) {
+				resp, body := request(t, srv, c.method, path)
+				if resp.StatusCode != http.StatusOK {
+					t.Errorf("status = %d, want 200", resp.StatusCode)
+				}
+				if got := resp.Header.Get("Content-Type"); got != "application/json" {
+					t.Errorf("Content-Type = %q, want application/json", got)
+				}
+				if body != c.body {
+					t.Errorf("body = %q, want %q", body, c.body)
+				}
+			})
+		}
+	}
+}
+
+func TestMetrics(t *testing.T) {
+	srv := httptest.NewServer((&app{token: "tok"}).handler())
+	defer srv.Close()
+	request(t, srv, http.MethodGet, "/health")
+	request(t, srv, http.MethodGet, "/health")
+	request(t, srv, http.MethodHead, "/t/tok/health")
+	request(t, srv, http.MethodGet, "/static/app.css")
+	request(t, srv, http.MethodGet, "/t/wrong/certs")
+
+	t.Run("GET", func(t *testing.T) {
+		resp, body := request(t, srv, http.MethodGet, "/t/tok/metrics")
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("status = %d, want 200", resp.StatusCode)
+		}
+		if got, want := resp.Header.Get("Content-Type"), "text/plain; version=0.0.4; charset=utf-8"; got != want {
+			t.Errorf("Content-Type = %q, want %q", got, want)
+		}
+		for _, line := range []string{
+			"# TYPE sshboard_http_requests_total counter",
+			`sshboard_http_requests_total{route="/",code="404"} 1`,
+			`sshboard_http_requests_total{route="/health",code="200"} 2`,
+			`sshboard_http_requests_total{route="/static/",code="200"} 1`,
+			`sshboard_http_requests_total{route="/t/{token}/health",code="200"} 1`,
+		} {
+			if !slices.Contains(strings.Split(body, "\n"), line) {
+				t.Errorf("metrics lack the line %q:\n%s", line, body)
+			}
+		}
+		for _, leak := range []string{"tok/", "wrong", "127.0.0.1"} {
+			if strings.Contains(body, leak) {
+				t.Errorf("metrics contain %q:\n%s", leak, body)
+			}
+		}
+	})
+
+	t.Run("HEAD", func(t *testing.T) {
+		resp, body := request(t, srv, http.MethodHead, "/t/tok/metrics")
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("status = %d, want 200", resp.StatusCode)
+		}
+		if got, want := resp.Header.Get("Content-Type"), "text/plain; version=0.0.4; charset=utf-8"; got != want {
+			t.Errorf("Content-Type = %q, want %q", got, want)
+		}
+		if body != "" {
+			t.Errorf("body = %q, want none", body)
+		}
+	})
+
+	t.Run("without token", func(t *testing.T) {
+		for _, method := range []string{http.MethodGet, http.MethodHead} {
+			if resp, _ := request(t, srv, method, "/metrics"); resp.StatusCode != http.StatusNotFound {
+				t.Errorf("%s /metrics status = %d, want 404", method, resp.StatusCode)
+			}
+		}
+	})
 }

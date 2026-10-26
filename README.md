@@ -281,6 +281,28 @@ This removes the endpoint from endpoints.yaml. It does not revoke the
 endpoint's tunnel certificate; that certificate stays valid until it expires or
 is revoked from the Certs view.
 
+### Health and metrics
+
+| Route | Methods | Token | Response |
+|---|---|---|---|
+| `/health` | `GET`, `HEAD` | not required | `200`, `application/json`, `{"status": "ok"}` |
+| `/t/<token>/health` | `GET`, `HEAD` | in the path | the same as `/health` |
+| `/t/<token>/metrics` | `GET`, `HEAD` | in the path | `200`, the Prometheus text format 0.0.4 |
+
+- A `HEAD` request gets the status and headers of the `GET` response without a
+  body.
+- `/health` answers `200` while the process serves requests. It does not check
+  that `sshca`, `bastionhub` or the files they read are available.
+- `/metrics` has one counter, `sshboard_http_requests_total`, with the labels
+  `route` and `code`. `route` is the registered route with the token written
+  `{token}` (`/t/{token}/certs`, `/static/`, `/health`). A request to a path
+  outside the token prefix that matches no route is counted under `/`. A
+  redirect for an uncleaned path or a missing trailing slash is counted under
+  the route of its target. No request path, query, form value, certificate
+  identity or client address is recorded.
+- The counts start at zero when the process starts.
+- `/metrics` without the token prefix is not served (`404`).
+
 ## Releases
 
 A merge into `main` that adds a version heading to [CHANGELOG.md](CHANGELOG.md)
