@@ -100,7 +100,8 @@ empty `## [Unreleased]` above it. A merge that adds no version heading releases 
    `GITHUB_TOKEN` starts no workflow, so the `push: tags` trigger of `release.yml` does not also run.
 4. `release.yml` builds the six targets at the tag and creates the GitHub Release. For a tag without
    `-`, its `homebrew` job sends a `formula-update` `repository_dispatch` event (`tool`, `tag`) to
-   `roselabs-io/homebrew-tools`, authenticated with the organization secret `HOMEBREW_TAP_TOKEN`.
+   `roselabs-io/homebrew-tools`, authenticated with `HOMEBREW_TAP_TOKEN`, read from Bitwarden Secrets
+   Manager (CI).
    The workflow there opens a PR that updates `Formula/sshboard.rb`.
 
 Pushing a `v*` tag by hand still runs `release.yml` directly; CI creates no prerelease tag. When a
@@ -177,8 +178,14 @@ audits on changes to `go.mod`, `go.sum`, `package.json` or `package-lock.json`, 
 
 All workflows run on GitHub-hosted `ubuntu-latest`. The repository is public; the organization's
 self-hosted runners do not serve it. `validate` and `sshboard-pm.yml` check out the private
-`roselabs-io/governor` with the organization secret `GOVERNOR_PM_TOKEN`, which a workflow run from a
-fork does not receive.
+`roselabs-io/governor` with `GOVERNOR_PM_TOKEN`.
+
+`GOVERNOR_PM_TOKEN` and `HOMEBREW_TAP_TOKEN` are secrets of the Bitwarden Secrets Manager project
+`roselabs-ci`, whose id is the organization variable `BWS_SHARED_PROJECT_ID`. A step installs `bws`
+2.1.0 (SHA-256 checked) into `$RUNNER_TEMP` and reads them with `bws run`, which authenticates with
+the GitHub secret `BWS_ACCESS_TOKEN`. A value an action reads through `with:` is masked and written to
+`$GITHUB_ENV` first. Besides `GITHUB_TOKEN`, `BWS_ACCESS_TOKEN` is the only GitHub secret the
+workflows read. A workflow run from a fork does not receive it.
 
 ## Pull requests
 
