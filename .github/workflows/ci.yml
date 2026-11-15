@@ -1,0 +1,92 @@
+# CI and release for the public repository. Published as .github/workflows/ci.yml.
+#
+# Push to main and pull requests: vet and format check, tests, browser tests,
+# and a build of the six release targets.
+# A tag matching v*: builds the six targets, writes checksums.txt and creates
+# a GitHub Release. The workflow uses GITHUB_TOKEN only.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Check
+        run: |
+          go vet ./...
+          test -z "$(gofmt -l .)"
+
+      - name: Test
+        run: go test ./...
+
+      - name: Browser tests
+        run: go test -tags browser -run TestBrowser ./...
+
+      - name: Build
+        run: |
+          out="$(mktemp -d)"
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
+            echo "go build $target"
+            CGO_ENABLED=0 GOOS="${target%/*}" GOARCH="${target#*/}" go build -o "$out/sshboard-${target%/*}-${target#*/}" .
+          done
+
+  release:
+    name: release
+    needs: gate
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build and package
+        run: |
+          mkdir -p dist
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
+            goos=${target%/*}
+            goarch=${target#*/}
+            bin=sshboard
+            [ "$goos" = windows ] && bin=sshboard.exe
+            work=$(mktemp -d)
+            GOOS=$goos GOARCH=$goarch CGO_ENABLED=0 go build \
+              -ldflags "-s -w -X main.version=${TAG}" -trimpath -o "$work/$bin" .
+            base="sshboard-${TAG}-${goos}-${goarch}"
+            if [ "$goos" = windows ]; then
+              (cd "$work" && zip -q "$GITHUB_WORKSPACE/dist/${base}.zip" "$bin")
+            else
+              tar -czf "dist/${base}.tar.gz" -C "$work" "$bin"
+            fi
+          done
+          (cd dist && sha256sum sshboard-* > checksums.txt)
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          files: dist/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          prerelease: ${{ contains(env.TAG, '-') }}

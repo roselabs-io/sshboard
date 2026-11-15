@@ -1,0 +1,13 @@
+{{define "cert-inspect"}}<dialog open>
+    <article>
+        <header>
+            <strong>{{if .Failed}}Inspect failed for{{else}}Certificate{{end}} <code>{{.KeyID}}</code></strong>
+        </header>
+        <p><small class="muted"><code>{{.Cert}}</code></small></p>
+        <pre>{{.Output}}</pre>
+        <footer>
+            <form method="dialog"><button type="submit" class="secondary">Close</button></form>
+        </footer>
+    </article>
+</dialog>
+{{end}}
